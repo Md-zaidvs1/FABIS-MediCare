@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+@theme {
+  --color-theme-primary: var(--primary);
+  --color-theme-primary-hover: var(--primary-hover);
+  --color-theme-accent: var(--accent);
+  --color-theme-accent-hover: var(--accent-hover);
+  --color-theme-page: var(--bg-page);
+  --color-theme-card: var(--bg-card);
+  --color-theme-main: var(--text-main);
+  --color-theme-secondary: var(--text-secondary);
+  --color-theme-border: var(--border-color);
+}
+
+:root, [data-theme="royal-navy"] {
+  --primary: #5B4CF0;
+  --primary-hover: #4939E3;
+  --accent: #3BA7F5;
+  --accent-hover: #2AA4C4;
+  --bg-page: #F6F8FC;
+  --bg-card: #FFFFFF;
+  --text-main: #1E293B;
+  --text-secondary: #64748B;
+  --border-color: #E8ECF3;
+}
+
+[data-theme="emerald-gold"] {
+  --primary: #059669;
+  --primary-hover: #047857;
+  --accent: #D97706;
+  --accent-hover: #B45309;
+  --bg-page: #F0FDF4;
+  --bg-card: #FFFFFF;
+  --text-main: #064E3B;
+  --text-secondary: #047857;
+  --border-color: #A7F3D0;
+}
+
+[data-theme="sapphire-ice"] {
+  --primary: #2563EB;
+  --primary-hover: #1D4ED8;
+  --accent: #0891B2;
+  --accent-hover: #0E7490;
+  --bg-page: #F0F9FF;
+  --bg-card: #FFFFFF;
+  --text-main: #0F172A;
+  --text-secondary: #475569;
+  --border-color: #BAE6FD;
+}
+
+[data-theme="sage-stone"] {
+  --primary: #475569;
+  --primary-hover: #334155;
+  --accent: #65A30D;
+  --accent-hover: #4D7C0F;
+  --bg-page: #F8FAFC;
+  --bg-card: #FFFFFF;
+  --text-main: #1E293B;
+  --text-secondary: #64748B;
+  --border-color: #CBD5E1;
+}
+
+[data-theme="midnight-obsidian"] {
+  --primary: #8B5CF6;
+  --primary-hover: #7C3AED;
+  --accent: #38BDF8;
+  --accent-hover: #0284C7;
+  --bg-page: #0F172A;
+  --bg-card: #1E293B;
+  --text-main: #F8FAFC;
+  --text-secondary: #94A3B8;
+  --border-color: #334155;
+}
+
+@layer base {
+  body {
+    background-color: var(--bg-page);
+    color: var(--text-main);
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+}
+
+/* Smooth custom scrollbars for natural tones */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #e4e4e7;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #d4d4d8;
+}

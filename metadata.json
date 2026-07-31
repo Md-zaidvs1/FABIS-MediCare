@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix Remix FABIS MEDICARE-1",
+  "description": "Single-Doctor Dental EMR \u0026 Clinic Management System for Dr. Alex Mercer featuring patient charts, teeth mapping, treatment plans, prescriptions, invoicing, and appointments.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
