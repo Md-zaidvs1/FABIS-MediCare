@@ -4,14 +4,13 @@ import { getLastVisitAndTreatment } from '../utils/formatters';
 import { 
   UserPlus, 
   CalendarPlus, 
-  FileText, 
   Receipt, 
   Search, 
-  RotateCcw, 
   LogOut, 
-  ShieldCheck,
-  UserCheck,
-  RefreshCw
+  Bell,
+  Stethoscope,
+  RefreshCw,
+  UserCheck
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -57,6 +56,20 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const [showSearchResults, setShowSearchResults] = React.useState(false);
 
+  // Compute total pending/due followups for notification badge
+  const notificationCount = React.useMemo(() => {
+    let count = 0;
+    const todayStr = new Date().toISOString().split('T')[0];
+    patients.forEach((p) => {
+      (p.followUps || []).forEach((f) => {
+        if (f.status !== 'Completed' && f.dueDate <= todayStr) {
+          count++;
+        }
+      });
+    });
+    return count;
+  }, [patients]);
+
   const filteredPatients = React.useMemo(() => {
     if (!searchQuery.trim()) return [];
     const q = searchQuery.toLowerCase();
@@ -69,154 +82,141 @@ export const Header: React.FC<HeaderProps> = ({
   }, [searchQuery, patients]);
 
   return (
-    <header className="sticky top-0 z-30 bg-theme-page/90 backdrop-blur-md px-3 sm:px-6 lg:px-8 py-3.5 transition-all text-theme-main border-b border-theme-border/50 max-w-full overflow-hidden">
-      <div className="max-w-7xl mx-auto flex flex-wrap md:flex-nowrap items-center justify-between gap-2 px-4 py-3 min-w-0 max-w-full overflow-hidden">
+    <header className="sticky top-0 z-40 bg-theme-page/95 backdrop-blur-md px-3 sm:px-6 lg:px-8 py-2.5 transition-all text-theme-main border-b border-theme-border/60 shadow-2xs max-w-full">
+      <div className="max-w-7xl mx-auto flex flex-wrap md:flex-nowrap items-center justify-between gap-3 min-w-0 max-w-full">
         
-        {/* Universal Patient Quick Search */}
-        <div className="relative flex-1 min-w-[200px] max-w-xs md:max-w-md">
-          <div className="relative flex items-center">
-            <Search className="absolute left-4 w-5 h-5 text-theme-secondary pointer-events-none" />
-            <input
-              type="text"
-              placeholder="Search patients, MRN, phone, invoice..."
-              value={searchQuery}
-              onChange={(e) => {
-                onSearchChange(e.target.value);
-                setShowSearchResults(true);
-              }}
-              onFocus={() => setShowSearchResults(true)}
-              className="w-full pl-11 pr-4 py-2.5 sm:py-3 bg-theme-card border border-theme-border focus:border-theme-accent focus:ring-2 focus:ring-theme-accent/20 text-theme-main placeholder-theme-secondary rounded-full text-xs sm:text-sm font-medium transition-all outline-none shadow-xs"
-            />
-          </div>
-
-          {/* Quick Search Dropdown Results */}
-          {showSearchResults && filteredPatients.length > 0 && (
-            <div 
-              className="absolute left-0 right-0 top-full mt-2 bg-theme-card border border-theme-border rounded-[24px] shadow-lg overflow-hidden z-50 divide-y divide-theme-border max-h-80 overflow-y-auto"
-            >
-              <div className="px-4 py-2.5 text-[12px] font-bold uppercase text-theme-secondary bg-theme-page">
-                Found {filteredPatients.length} matching patients
-              </div>
-              {filteredPatients.map((p) => {
-                const totalBalance = p.invoices.reduce((sum, inv) => sum + inv.balanceDue, 0);
-                const { lastVisitDate, lastTxName } = getLastVisitAndTreatment(p);
-
-                return (
-                  <button
-                    key={p.id}
-                    onClick={() => {
-                      onSelectPatient(p.id);
-                      setShowSearchResults(false);
-                      onSearchChange('');
-                    }}
-                    className="w-full text-left p-3.5 hover:bg-theme-page transition-colors flex items-center justify-between group gap-3 cursor-pointer"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm sm:text-base font-bold text-theme-main group-hover:text-theme-accent flex items-center gap-2 truncate">
-                        <span className="truncate">{p.name}</span>
-                        <span className="text-theme-secondary font-normal text-xs shrink-0">({p.age}Y / {p.gender})</span>
-                      </div>
-                      <div className="text-xs text-theme-secondary flex items-center gap-2 flex-wrap mt-0.5">
-                        <span>MRN: {p.mrn}</span>
-                        <span>•</span>
-                        <span>Mob: {p.phone}</span>
-                        <span>•</span>
-                        <span>Last: {lastVisitDate}</span>
-                      </div>
-                      <div className="text-xs text-theme-secondary font-medium truncate mt-0.5">
-                        Tx: {lastTxName}
-                      </div>
-                    </div>
-                    <div className="text-right shrink-0">
-                      {totalBalance > 0 ? (
-                        <span className="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-rose-50 text-rose-700 border border-rose-200 block">
-                          Due: ₹{totalBalance}
-                        </span>
-                      ) : (
-                        <span className="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 block">
-                          Paid
-                        </span>
-                      )}
-                      <span className="text-xs text-theme-accent mt-1 block font-semibold">
-                        Open EMR →
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
+        {/* Global Search Bar on Far Left */}
+        <div className="flex items-center gap-3 flex-1 min-w-[240px] max-w-xl">
+          {/* Universal Patient Quick Search */}
+          <div className="relative flex-1">
+            <div className="relative flex items-center">
+              <Search className="absolute left-3.5 w-4 h-4 text-theme-secondary pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Search patient, MRN, phone..."
+                value={searchQuery}
+                onChange={(e) => {
+                  onSearchChange(e.target.value);
+                  setShowSearchResults(true);
+                }}
+                onFocus={() => setShowSearchResults(true)}
+                className="w-full pl-10 pr-4 py-2 bg-theme-card border border-theme-border focus:border-theme-accent focus:ring-2 focus:ring-theme-accent/20 text-theme-main placeholder-theme-secondary rounded-xl text-xs font-semibold transition-all outline-none shadow-2xs"
+              />
             </div>
-          )}
+
+            {/* Quick Search Dropdown Results */}
+            {showSearchResults && filteredPatients.length > 0 && (
+              <div 
+                className="absolute left-0 right-0 top-full mt-2 bg-theme-card border border-theme-border rounded-2xl shadow-xl overflow-hidden z-50 divide-y divide-theme-border max-h-80 overflow-y-auto"
+              >
+                <div className="px-4 py-2 text-[11px] font-bold uppercase text-theme-secondary bg-theme-page">
+                  Found {filteredPatients.length} matching patients
+                </div>
+                {filteredPatients.map((p) => {
+                  const totalBalance = (p.invoices || []).reduce((sum, inv) => sum + inv.balanceDue, 0);
+                  const { lastVisitDate, lastTxName } = getLastVisitAndTreatment(p);
+
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => {
+                        onSelectPatient(p.id);
+                        setShowSearchResults(false);
+                        onSearchChange('');
+                      }}
+                      className="w-full text-left p-3 hover:bg-theme-page transition-colors flex items-center justify-between group gap-3 cursor-pointer"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs sm:text-sm font-bold text-theme-main group-hover:text-theme-accent flex items-center gap-2 truncate">
+                          <span className="truncate">{p.name}</span>
+                          <span className="text-theme-secondary font-normal text-[11px] shrink-0">({p.age}Y / {p.gender})</span>
+                        </div>
+                        <div className="text-[11px] text-theme-secondary flex items-center gap-1.5 flex-wrap mt-0.5 font-medium">
+                          <span>MRN: {p.mrn}</span>
+                          <span>•</span>
+                          <span>Mob: {p.phone}</span>
+                          <span>•</span>
+                          <span>Last: {lastVisitDate}</span>
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        {totalBalance > 0 ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-rose-50 text-rose-700 border border-rose-200 block">
+                            Due: ₹{totalBalance}
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 block">
+                            Paid
+                          </span>
+                        )}
+                        <span className="text-[11px] text-theme-accent mt-0.5 block font-bold">
+                          Open EMR →
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Action Buttons Row */}
-        <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0 touch-manipulation">
+        {/* Action Buttons & Profile Controls */}
+        <div className="flex items-center gap-2 flex-shrink-0 touch-manipulation">
+          {/* + Patient */}
           <button
             onClick={() => onOpenAddPatient()}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs md:text-sm font-bold rounded-full bg-theme-accent hover:bg-theme-accent-hover active:scale-[0.98] text-white shadow-md transition-all whitespace-nowrap shrink-0 cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl bg-theme-accent hover:bg-theme-accent-hover active:scale-[0.98] text-white shadow-xs transition-all whitespace-nowrap cursor-pointer"
           >
-            <UserPlus className="w-4 h-4 text-white shrink-0" />
-            <span>+ Add Patient</span>
+            <UserPlus className="w-3.5 h-3.5 text-white shrink-0" />
+            <span>+ Patient</span>
           </button>
 
+          {/* + Appointment */}
           <button
             onClick={() => onOpenBookAppointment()}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs md:text-sm font-semibold rounded-full bg-theme-card hover:bg-theme-page text-theme-main border border-theme-border shadow-xs transition-all whitespace-nowrap active:scale-[0.98] shrink-0 cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl bg-theme-card hover:bg-theme-page text-theme-main border border-theme-border shadow-2xs transition-all whitespace-nowrap active:scale-[0.98] cursor-pointer"
           >
-            <CalendarPlus className="w-4 h-4 text-theme-accent shrink-0" />
-            <span>Book Visit</span>
+            <CalendarPlus className="w-3.5 h-3.5 text-theme-accent shrink-0" />
+            <span>+ Appointment</span>
           </button>
 
-          <button
-            onClick={() => onOpenCreateInvoice()}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs md:text-sm font-semibold rounded-full bg-theme-card hover:bg-theme-page text-theme-main border border-theme-border shadow-xs transition-all whitespace-nowrap active:scale-[0.98] shrink-0 cursor-pointer"
-          >
-            <Receipt className="w-4 h-4 text-amber-500 shrink-0" />
-            <span>Invoice</span>
-          </button>
-
-          <button
-            onClick={() => onOpenPrescription()}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs md:text-sm font-semibold rounded-full bg-theme-card hover:bg-theme-page text-theme-main border border-theme-border shadow-xs transition-all whitespace-nowrap active:scale-[0.98] shrink-0 cursor-pointer"
-          >
-            <FileText className="w-4 h-4 text-emerald-500 shrink-0" />
-            <span>Rx</span>
-          </button>
-
-          {/* Icon Controls */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            {/* Online / Offline Sync Badge */}
+          {/* Notifications Bell */}
+          <div className="relative">
             <button
-              onClick={onManualSync}
-              title={isOnline ? (pendingCount > 0 ? `${pendingCount} pending updates. Click to sync.` : 'Online & Dual-Saved to IndexedDB') : 'Offline Mode active. All saves held locally in IndexedDB.'}
-              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold rounded-full border shadow-2xs transition-all cursor-pointer ${
-                !isOnline
-                  ? 'bg-amber-50 text-amber-800 border-amber-300'
-                  : pendingCount > 0
-                  ? 'bg-sky-50 text-sky-800 border-sky-300'
-                  : 'bg-emerald-50 text-emerald-800 border-emerald-200'
-              }`}
+              title="Notifications & Alerts"
+              className="w-9 h-9 rounded-xl bg-theme-card border border-theme-border flex items-center justify-center text-theme-secondary hover:text-theme-main transition-all cursor-pointer relative shadow-2xs"
             >
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  !isOnline
-                    ? 'bg-amber-500 animate-pulse'
-                    : pendingCount > 0
-                    ? 'bg-sky-500 animate-bounce'
-                    : 'bg-emerald-500'
-                }`}
-              />
-              <span className="hidden sm:inline-block">
-                {!isOnline ? 'Offline Mode' : pendingCount > 0 ? `Sync (${pendingCount})` : 'Cloud & IDB Synced'}
-              </span>
-              {isSyncing && <RefreshCw className="w-3 h-3 animate-spin text-current ml-0.5" />}
+              <Bell className="w-4 h-4 text-theme-main" />
+              {notificationCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-rose-500 text-white text-[9px] font-black flex items-center justify-center border-2 border-theme-card">
+                  {notificationCount}
+                </span>
+              )}
             </button>
+          </div>
 
+          {/* Doctor Profile Badge */}
+          <div className="flex items-center gap-2 pl-2 border-l border-theme-border/60">
+            <div className="w-8 h-8 rounded-xl bg-blue-50 border border-blue-200 text-blue-700 flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs">
+              <Stethoscope className="w-4 h-4 text-blue-600" />
+            </div>
+            <div className="hidden lg:block text-left">
+              <div className="text-xs font-extrabold text-theme-main leading-tight">
+                {doctor.name || 'Dr. V. Radhakrishnan'}
+              </div>
+              <div className="text-[10px] font-semibold text-theme-secondary leading-none">
+                {activeRole === 'admin' ? 'Clinic Admin' : 'Senior Dentist'}
+              </div>
+            </div>
+
+            {/* Logout */}
             <button
               onClick={() => onLogout()}
               title="Logout"
-              className="w-8 h-8 md:w-9 md:h-9 rounded-full bg-theme-card border border-theme-border flex items-center justify-center text-theme-secondary hover:text-rose-600 shadow-xs transition-all cursor-pointer shrink-0"
+              className="p-1.5 rounded-lg text-theme-secondary hover:text-rose-600 hover:bg-rose-50 transition-all cursor-pointer ml-1"
             >
-              <LogOut className="w-4 h-4 text-theme-secondary shrink-0" />
+              <LogOut className="w-4 h-4" />
             </button>
           </div>
 
@@ -225,3 +225,4 @@ export const Header: React.FC<HeaderProps> = ({
     </header>
   );
 };
+

@@ -1,10 +1,11 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Patient, Prescription, MedicineItem, DoctorProfile } from '../../types';
 import {
   formatTodayISO,
   formatDate,
 } from '../../utils/formatters';
-import { handleSharePdfOrWhatsApp, sharePrescriptionPdf } from '../../utils/pdfShare';
+import { handleSharePdfOrWhatsApp, sharePrescriptionPdf, printPdfBlob } from '../../utils/pdfShare';
+import { generatePrescriptionJsPdf } from '../../utils/jsPdfPrescriptionGenerator';
 import { InternalFollowUpTrigger, FollowUpAlertConfig } from '../PatientEMR/InternalFollowUpTrigger';
 import {
   getStoredDeletedPredefinedMedicines,
@@ -81,7 +82,6 @@ export const PrescriptionModal: React.FC<PrescriptionModalProps> = ({
   const [customPresetMeds, setCustomPresetMeds] = useState<PresetMedicine[]>(() => getStoredCustomMedicines());
 
   // Search & Custom Form State
-  const [printMode, setPrintMode] = useState<'A4' | 'Thermal80mm'>('A4');
   const rxPreviewRef = useRef<HTMLDivElement>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isCustomFormOpen, setIsCustomFormOpen] = useState(false);
@@ -210,6 +210,24 @@ export const PrescriptionModal: React.FC<PrescriptionModalProps> = ({
     }
   };
 
+  const handleDirectPrintA4 = () => {
+    if (!selectedPatient) return;
+    const currentRx: Prescription = {
+      id: initialPrescription?.id || `RX-${Date.now().toString().slice(-4)}`,
+      patientId: selectedPatient.id,
+      patientName: selectedPatient.name,
+      doctorName: doctor.name,
+      date: rxDate || formatTodayISO(),
+      chiefComplaint,
+      diagnosis,
+      medicines,
+      specialInstructions,
+      nextVisitDate,
+    };
+    const pdfBlob = generatePrescriptionJsPdf(currentRx, doctor, selectedPatient, getStoredCustomClinicLogo());
+    printPdfBlob(pdfBlob);
+  };
+
   const handleShareWhatsAppA4 = () => {
     if (!selectedPatient) return;
     const currentRx: Prescription = {
@@ -230,24 +248,6 @@ export const PrescriptionModal: React.FC<PrescriptionModalProps> = ({
       patient: selectedPatient,
       customLogo: getStoredCustomClinicLogo(),
     });
-  };
-
-  const handleShareWhatsAppThermal = () => {
-    if (!selectedPatient) return;
-    setPrintMode('Thermal80mm');
-    setTimeout(() => {
-      if (rxPreviewRef.current) {
-        const safePatientName = selectedPatient.name.replace(/\s+/g, '_');
-        handleSharePdfOrWhatsApp({
-          element: rxPreviewRef.current,
-          fileName: `Prescription_Receipt_${safePatientName}.pdf`,
-          title: `Prescription Receipt - ${doctor.clinicName}`,
-          text: `Hello ${selectedPatient.name}, here is your prescription receipt from ${doctor.clinicName}.`,
-          patientPhone: selectedPatient.phone,
-          format: 'thermal',
-        });
-      }
-    }, 100);
   };
 
   const handleUpdateMed = (id: string, field: keyof MedicineItem, value: string) => {
@@ -729,133 +729,134 @@ export const PrescriptionModal: React.FC<PrescriptionModalProps> = ({
         ) : (
           /* Printable Rx Letterhead View with Sticky Footer */
           <div className="flex-1 flex flex-col justify-between overflow-hidden pt-3">
-            {/* Format Selector */}
-            <div className="flex items-center justify-between pb-3 shrink-0 border-b border-[#E8ECF3] mb-2">
-              <span className="text-xs font-bold text-[#64748B] flex items-center gap-1.5">
-                <FileText className="w-4 h-4 text-[#3BA7F5]" /> Prescription Preview Format:
-              </span>
-              <div className="flex bg-[#F1F5F9] p-1 rounded-2xl border border-[#E8ECF3] text-xs">
-                <button
-                  type="button"
-                  onClick={() => setPrintMode('A4')}
-                  className={`px-3 py-1.5 min-h-[38px] rounded-xl font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                    printMode === 'A4'
-                      ? 'bg-white text-[#1E293B] shadow-xs border border-[#E8ECF3]'
-                      : 'text-[#64748B] hover:text-[#1E293B]'
-                  }`}
-                >
-                  <FileText className="w-4 h-4 text-[#3BA7F5]" />
-                  <span>A4 Rx</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPrintMode('Thermal80mm')}
-                  className={`px-3 py-1.5 min-h-[38px] rounded-xl font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                    printMode === 'Thermal80mm'
-                      ? 'bg-white text-[#1E293B] shadow-xs border border-[#E8ECF3]'
-                      : 'text-[#64748B] hover:text-[#1E293B]'
-                  }`}
-                >
-                  <Receipt className="w-4 h-4 text-amber-600" />
-                  <span>80mm POS</span>
-                </button>
-              </div>
-            </div>
-
             <div className="flex-1 overflow-y-auto space-y-6 pr-1 pb-4">
-              {printMode === 'A4' ? (
-                /* Standard A4 Rx View */
-                <div ref={rxPreviewRef} className="bg-white text-[#1E293B] p-6 sm:p-8 rounded-2xl space-y-6 border border-[#E8ECF3] shadow-sm">
-                  {/* Clinic Header */}
-                  <div className="border-b-2 border-[#3BA7F5] pb-4 flex justify-between items-start gap-4">
-                    <div>
-                      {customLogo && (
-                        <img
-                          src={customLogo}
-                          alt="Clinic Logo"
-                          className="max-h-16 max-w-[200px] object-contain mb-2"
-                        />
-                      )}
-                      <h1 className="text-xl font-extrabold text-[#3BA7F5] uppercase tracking-tight">
-                        {doctor.clinicName}
-                      </h1>
-                      <p className="text-xs text-[#64748B]">{doctor.clinicAddress}</p>
-                      <p className="text-xs text-[#64748B]">Tel: {doctor.clinicPhone} | {doctor.clinicEmail}</p>
-                    </div>
-                    <div className="text-right">
-                      <h2 className="text-sm font-bold text-[#1E293B]">{doctor.name}</h2>
-                      <p className="text-[11px] text-[#64748B]">{doctor.qualifications}</p>
-                      <p className="text-[10px] text-[#3BA7F5] font-mono font-bold">Reg #: {doctor.regNumber}</p>
-                    </div>
-                  </div>
+              {/* Standard A4 Rx Direct Letterhead Preview */}
+              <div
+                ref={rxPreviewRef}
+                className="bg-white text-[#0F172A] rounded-2xl border border-slate-200 relative overflow-hidden max-w-3xl mx-auto shadow-sm p-6 sm:p-8 space-y-6"
+              >
+                  {/* Top Cyan Accent Strip */}
+                  <div className="absolute top-0 left-0 right-0 h-2 bg-[#0284C7]" />
 
-                  {/* Patient Info Bar */}
-                  <div className="bg-[#F8FAFC] p-3.5 rounded-2xl border border-[#E8ECF3] space-y-1.5 text-xs font-semibold text-[#1E293B]">
-                    <div className="flex flex-wrap justify-between gap-2">
+                  <div className="relative z-10 space-y-5 pt-1">
+                    {/* Header Section */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+                      {/* Left: Clinic Identity (Logoless) */}
                       <div>
-                        Patient: <span className="text-[#3BA7F5] font-bold">{selectedPatient?.name}</span> ({selectedPatient?.age} / {selectedPatient?.gender})
+                        <h1 className="text-lg sm:text-xl font-extrabold text-[#0284C7] uppercase tracking-tight">
+                          {doctor.clinicName || 'RK DENTAL CLINIC'}
+                        </h1>
+                        <p className="text-xs font-semibold text-slate-600">MULTISPECIALTY DENTAL CARE & ORAL SURGERY</p>
+                        <p className="text-[11px] text-slate-500">{doctor.clinicAddress || 'No. 626, Melin Road, Veyyakkam 604410'}</p>
+                        <p className="text-[11px] text-[#0284C7] font-medium">
+                          Tel: {doctor.clinicPhone || '8883261285 / 04182-247369'} | Email: {doctor.clinicEmail || 'info@rkdentalclinic.com'}
+                        </p>
                       </div>
-                      <div>MRN: <span className="font-mono font-bold text-[#3BA7F5]">{selectedPatient?.mrn}</span></div>
-                      <div>Date: {formatDate(rxDate)}</div>
+
+                      {/* Right: Doctor Profile */}
+                      <div className="text-left sm:text-right border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-100">
+                        <h2 className="text-sm font-bold text-[#0F172A]">
+                          {doctor.name ? (doctor.name.startsWith('Dr.') ? doctor.name : `Dr. ${doctor.name}`) : 'Dr. V. Radhakrishnan'}
+                        </h2>
+                        <p className="text-xs text-slate-600">{doctor.qualifications || 'B.D.S. - Dental Surgeon'}</p>
+                        <p className="text-[11px] font-bold text-[#0284C7]">Reg No: {doctor.regNumber || '25927'}</p>
+                        <p className="text-[10px] text-slate-400 italic">Dental EMR Verified</p>
+                      </div>
                     </div>
-                    {(selectedPatient?.streetAddress || selectedPatient?.cityArea || selectedPatient?.address) && (
-                      <div className="text-[11px] text-[#64748B] flex items-center gap-1 pt-1 border-t border-[#E8ECF3]/60">
-                        <span>📍 Address:</span>
-                        <span className="font-medium text-[#1E293B]">
-                          {[selectedPatient.streetAddress, selectedPatient.cityArea, selectedPatient.pincode].filter(Boolean).join(', ') || selectedPatient.address}
-                        </span>
+
+                    {/* Patient Information Bar */}
+                    <div className="bg-[#F8FAFC] border border-[#0284C7]/30 rounded-xl p-3.5 text-xs font-semibold text-[#0F172A] grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div>
+                        <span className="text-[#0284C7] font-bold block text-[10px] uppercase">Patient Name</span>
+                        <span className="font-bold text-[#0F172A]">{selectedPatient?.name || 'ZAID KHAN'}</span>
+                      </div>
+                      <div>
+                        <span className="text-[#0284C7] font-bold block text-[10px] uppercase">Age / Gender</span>
+                        <span>{selectedPatient?.age || 28} Yrs / {selectedPatient?.gender || 'Male'}</span>
+                      </div>
+                      <div>
+                        <span className="text-[#0284C7] font-bold block text-[10px] uppercase">Date</span>
+                        <span>{formatDate(rxDate)}</span>
+                      </div>
+                      <div>
+                        <span className="text-[#0284C7] font-bold block text-[10px] uppercase">MRN / Rx ID</span>
+                        <span className="font-mono text-[#0284C7] font-bold">{selectedPatient?.mrn || initialPrescription?.id || 'RX-1001'}</span>
+                      </div>
+                    </div>
+
+                    {/* Clinical Details */}
+                    {(chiefComplaint || diagnosis) && (
+                      <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs space-y-1">
+                        {chiefComplaint && (
+                          <p><strong className="text-[#0284C7]">Chief Complaint:</strong> <span className="text-slate-700">{chiefComplaint}</span></p>
+                        )}
+                        {diagnosis && (
+                          <p><strong className="text-[#0284C7]">Diagnosis:</strong> <span className="text-slate-700">{diagnosis}</span></p>
+                        )}
                       </div>
                     )}
-                  </div>
 
-                  <div className="text-xs space-y-1">
-                    <p><strong>Chief Complaint:</strong> {chiefComplaint}</p>
-                    <p><strong>Diagnosis:</strong> {diagnosis}</p>
-                  </div>
+                    {/* Rx Symbol */}
+                    <div className="text-3xl font-serif font-black text-[#0284C7]">Rx</div>
 
-                  {/* Rx Symbol */}
-                  <div className="text-2xl font-serif font-black text-[#3BA7F5]">Rx</div>
-
-                  {/* Medicines Table */}
-                  <div className="overflow-x-auto min-w-0">
-                    <table className="w-full text-left text-xs border-collapse">
-                      <thead>
-                        <tr className="border-b-2 border-[#E8ECF3] text-[#64748B] font-bold uppercase text-[10px]">
-                          <th className="py-2.5">Medicine Name</th>
-                          <th className="py-2.5">Dosage</th>
-                          <th className="py-2.5">Frequency & Timing</th>
-                          <th className="py-2.5">Duration</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[#E8ECF3]">
-                        {medicines.map((m) => (
-                          <tr key={m.id} className="py-2.5">
-                            <td className="py-2.5 font-bold text-[#1E293B]">{m.name}</td>
-                            <td className="py-2.5 text-[#64748B]">{m.dosage}</td>
-                            <td className="py-2.5 font-bold text-[#1E88A8]">
-                              {m.frequency}{m.timing ? ` (${m.timing})` : ''}
-                            </td>
-                            <td className="py-2.5 text-[#64748B]">{m.duration}</td>
+                    {/* Medicines Table */}
+                    <div className="overflow-x-auto min-w-0">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                          <tr className="bg-[#0E7490] text-white font-bold text-[11px]">
+                            <th className="py-2 px-3 rounded-l-md">#</th>
+                            <th className="py-2 px-3">Medicine Name & Dosage</th>
+                            <th className="py-2 px-3">Dosage</th>
+                            <th className="py-2 px-3">Frequency / Timing</th>
+                            <th className="py-2 px-3 rounded-r-md">Duration</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {/* Instructions */}
-                  <div className="pt-4 border-t border-[#E8ECF3] text-xs">
-                    <p className="font-bold text-[#1E293B]">Doctor Advice:</p>
-                    <p className="text-[#64748B] italic">{specialInstructions}</p>
-                  </div>
-
-                  {/* Doctor Seal & Sign */}
-                  <div className="flex justify-between items-end pt-10 text-xs">
-                    <div>
-                      <p className="text-[10px] text-[#94A3B8] font-mono">Digital EMR Verified Prescription</p>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 border-x border-b border-slate-100">
+                          {medicines.map((m, idx) => (
+                            <tr key={m.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
+                              <td className="py-2.5 px-3 font-bold text-slate-500">{idx + 1}</td>
+                              <td className="py-2.5 px-3">
+                                <div className="font-bold text-[#0F172A]">{m.name}</div>
+                                {m.dosage && <div className="text-[10px] text-slate-500">Dose: {m.dosage}</div>}
+                              </td>
+                              <td className="py-2.5 px-3 text-slate-700">{m.dosage || '1 Tab'}</td>
+                              <td className="py-2.5 px-3 font-bold text-[#0284C7]">
+                                {m.frequency}{m.timing ? ` (${m.timing})` : ''}
+                              </td>
+                              <td className="py-2.5 px-3 font-bold text-[#0F172A]">{m.duration}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-                    <div className="text-center border-t border-[#64748B] pt-1 w-48">
-                      <p className="font-bold text-[#1E293B]">{doctor.name}</p>
-                      <p className="text-[10px] text-[#64748B]">Doctor Signature & Seal</p>
+
+                    {/* Special Instructions */}
+                    {specialInstructions && (
+                      <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs space-y-0.5">
+                        <p className="font-bold text-amber-900">DOCTOR ADVICE / SPECIAL INSTRUCTIONS:</p>
+                        <p className="text-amber-800 italic">{specialInstructions}</p>
+                      </div>
+                    )}
+
+                    {/* Follow-Up Date */}
+                    {nextVisitDate && (
+                      <div className="inline-block bg-sky-50 border border-sky-200 px-3 py-1.5 rounded-lg text-xs font-bold text-[#0284C7]">
+                        Next Visit / Follow-up: {formatDate(nextVisitDate)}
+                      </div>
+                    )}
+
+                    {/* Footer Section */}
+                    <div className="border-t border-slate-200 pt-4 text-[11px] flex justify-between items-end gap-4">
+                      <div>
+                        <p className="font-bold text-[#0284C7]">Digital EMR Certified Prescription</p>
+                        <p className="text-[10px] text-slate-400">* Please follow prescribed dosage instructions carefully.</p>
+                      </div>
+                      <div className="text-center border-t border-slate-400 pt-1 w-44">
+                        <p className="font-bold text-[#0F172A]">
+                          {doctor.name ? (doctor.name.startsWith('Dr.') ? doctor.name : `Dr. ${doctor.name}`) : 'Dr. V. Radhakrishnan'}
+                        </p>
+                        <p className="text-[10px] text-slate-500">Doctor Signature & Stamp</p>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -900,7 +901,6 @@ export const PrescriptionModal: React.FC<PrescriptionModalProps> = ({
                     Digital EMR Verified Rx
                   </div>
                 </div>
-              )}
             </div>
 
             {/* Sticky Action Footer */}
@@ -916,7 +916,7 @@ export const PrescriptionModal: React.FC<PrescriptionModalProps> = ({
               <div className="flex flex-wrap items-center gap-2.5">
                 <button
                   type="button"
-                  onClick={() => window.print()}
+                  onClick={handleDirectPrintA4}
                   className="px-5 py-3 min-h-[44px] rounded-full bg-[#0F172A] hover:bg-[#1E293B] text-white font-bold text-xs flex items-center gap-2 shadow-xs transition-colors cursor-pointer"
                 >
                   <Printer className="w-4 h-4 text-[#3BA7F5]" /> Print
@@ -926,18 +926,9 @@ export const PrescriptionModal: React.FC<PrescriptionModalProps> = ({
                   type="button"
                   onClick={handleShareWhatsAppA4}
                   className="px-4 py-3 min-h-[44px] rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-2 shadow-[0_8px_20px_rgba(16,185,129,0.3)] transition-colors cursor-pointer"
-                  title="Share A4 PDF Prescription layout via WhatsApp"
+                  title="Share PDF Prescription layout via WhatsApp"
                 >
-                  <FileText className="w-4 h-4 text-emerald-100" /> Share A4 PDF via WhatsApp
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleShareWhatsAppThermal}
-                  className="px-4 py-3 min-h-[44px] rounded-full bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs flex items-center gap-2 shadow-[0_8px_20px_rgba(13,148,136,0.3)] transition-colors cursor-pointer"
-                  title="Share 80mm POS Thermal Prescription layout via WhatsApp"
-                >
-                  <Receipt className="w-4 h-4 text-teal-100" /> Share Thermal PDF via WhatsApp
+                  <FileText className="w-4 h-4 text-emerald-100" /> Share via WhatsApp
                 </button>
               </div>
             </div>

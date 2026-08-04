@@ -31,10 +31,10 @@ export const RecallTrackerModal: React.FC<RecallTrackerModalProps> = ({
     phone: string;
   }[] = [];
 
-  patients.forEach((p) => {
+  (patients || []).forEach((p) => {
     // Check followUps
     if (p.followUps && p.followUps.length > 0) {
-      p.followUps.forEach((f) => {
+      (p.followUps || []).forEach((f) => {
         recallList.push({
           id: f.id,
           patient: p,

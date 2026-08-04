@@ -23,7 +23,7 @@ export const PrescriptionsView: React.FC<PrescriptionsViewProps> = ({
   onDeletePrescription,
 }) => {
   const allRx = patients.flatMap((p) =>
-    p.prescriptions.map((rx) => ({
+    (p.prescriptions || []).map((rx) => ({
       ...rx,
       patientName: p.name,
       patientPhone: p.phone,

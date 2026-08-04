@@ -1,313 +1,370 @@
 import { jsPDF } from 'jspdf';
 import { Prescription, DoctorProfile, Patient } from '../types';
 import { formatDate } from './formatters';
-import { PrintTemplateConfig, getActiveTemplate } from '../components/PrintDesigner/TemplateStorage';
 
-function hexToRgb(hex: string): [number, number, number] {
-  let clean = (hex || '#0EA5E9').replace('#', '');
-  if (clean.length === 3) {
-    clean = clean.split('').map((c) => c + c).join('');
-  }
-  const num = parseInt(clean, 16);
-  if (isNaN(num)) return [14, 165, 233];
-  return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
-}
-
+/**
+ * Generates an ultra-lightweight (under 15 KB), 100% vector, print-ready Dental Prescription PDF without logos.
+ */
 export function generatePrescriptionJsPdf(
   rx: Prescription,
   doctor: DoctorProfile,
   patient?: Patient | null,
-  customLogoUrl?: string | null,
-  templateConfig?: PrintTemplateConfig
+  _customLogoUrl?: string | null
 ): Blob {
-  const tpl = templateConfig || getActiveTemplate('prescription_a4');
-  const primaryRgb = hexToRgb(tpl.primaryColor);
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
 
-  const doc = new jsPDF('p', 'mm', 'a4');
-  const pageWidth = doc.internal.pageSize.getWidth(); // 210mm
-  const pageHeight = doc.internal.pageSize.getHeight(); // 297mm
-  const margin = tpl.marginMm || 15;
-  const contentWidth = pageWidth - margin * 2; // 180mm
+  const pageWidth = 210;
+  const pageHeight = 297;
+  const margin = 12;
+  const contentWidth = pageWidth - margin * 2; // 186 mm
 
-  let currentY = margin;
+  // Color Palette Definitions (RGB)
+  const PRIMARY = { r: 2, g: 132, b: 199 };     // #0284C7 Dental Cyan
+  const DARK_NAVY = { r: 15, g: 23, b: 42 };    // #0F172A Body Text
+  const SLATE = { r: 71, g: 85, b: 105 };       // #475569 Muted Labels
+  const LIGHT_BG = { r: 248, g: 250, b: 252 };  // #F8FAFC Patient Bar
+  const BORDER_CLR = { r: 226, g: 232, b: 240 };// #E2E8F0 Soft Dividers
+  const TEAL_HDR = { r: 14, g: 116, b: 144 };   // #0E7490 Table Header
+  const AMBER_BG = { r: 255, g: 251, b: 235 };  // #FFFBEB Advice Box
+  const AMBER_BRD = { r: 252, g: 211, b: 77 };  // #FCD34D Advice Border
 
-  // 1. Header Section
-  if (tpl.showLogo && customLogoUrl) {
-    try {
-      doc.addImage(customLogoUrl, 'PNG', margin, currentY, 40, 15);
-      currentY += 18;
-    } catch (e) {
-      console.warn('Could not render logo in jsPDF:', e);
-    }
-  }
+  // 1. Top Decorative Brand Bar
+  doc.setFillColor(PRIMARY.r, PRIMARY.g, PRIMARY.b);
+  doc.rect(0, 0, pageWidth, 4, 'F');
+  doc.setFillColor(251, 191, 36); // Gold Accent
+  doc.rect(0, 4, pageWidth, 0.8, 'F');
 
-  // Clinic Details (Left)
-  if (tpl.showClinicName) {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(20);
-    doc.setTextColor(primaryRgb[0], primaryRgb[1], primaryRgb[2]);
-    doc.text((tpl.clinicNameOverride || doctor.clinicName || 'DENTAL CLINIC').toUpperCase(), margin, currentY);
-    currentY += 6;
-  }
+  // 2. Header Section (Clean text layout starting directly from left margin)
+  const clinicName = doctor.clinicName || 'RK DENTAL CLINIC';
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(15);
+  doc.setTextColor(PRIMARY.r, PRIMARY.g, PRIMARY.b);
+  doc.text(clinicName.toUpperCase(), margin, 15);
 
-  if (tpl.showClinicAddress) {
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.setTextColor(71, 85, 105); // slate-600
-    doc.text(tpl.clinicAddressOverride || doctor.clinicAddress || 'Clinic Address', margin, currentY);
-    currentY += 5;
-  }
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(SLATE.r, SLATE.g, SLATE.b);
+  doc.text('MULTISPECIALTY DENTAL CARE & ORAL SURGERY', margin, 20);
 
-  const phoneStr = tpl.showClinicPhone ? (tpl.clinicPhoneOverride || doctor.clinicPhone || '') : '';
-  const emailStr = tpl.showClinicEmail ? (tpl.clinicEmailOverride || doctor.clinicEmail || '') : '';
-  if (phoneStr || emailStr) {
-    const contactText = `Ph: ${phoneStr}${emailStr ? ' | ' + emailStr : ''}`;
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.setTextColor(71, 85, 105);
-    doc.text(contactText, margin, currentY);
-    currentY += 5;
-  }
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  const clinicAddr = doctor.clinicAddress || 'No. 626, Melin Road, Veyyakkam - 604410';
+  doc.text(clinicAddr, margin, 24.5, { maxWidth: 110 });
 
-  // Doctor Details (Right)
-  let headerRightY = margin;
-  if (tpl.showDoctorName) {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(14);
-    doc.setTextColor(30, 41, 59);
-    doc.text(`Dr. ${tpl.doctorNameOverride || doctor.name}`, pageWidth - margin, headerRightY, { align: 'right' });
-    headerRightY += 5;
-  }
+  const phoneStr = doctor.clinicPhone ? `Ph: ${doctor.clinicPhone}` : 'Ph: 8883261285 / 04182-247369';
+  const emailStr = doctor.clinicEmail ? ` | Email: ${doctor.clinicEmail}` : '';
+  doc.setFontSize(7.5);
+  doc.setTextColor(PRIMARY.r, PRIMARY.g, PRIMARY.b);
+  doc.text(`${phoneStr}${emailStr}`, margin, 29);
 
-  if (tpl.showQualification) {
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.setTextColor(71, 85, 105);
-    doc.text(tpl.qualificationOverride || doctor.qualifications || 'BDS, MDS', pageWidth - margin, headerRightY, { align: 'right' });
-    headerRightY += 5;
-  }
-
-  if (tpl.showRegNumber) {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(primaryRgb[0], primaryRgb[1], primaryRgb[2]);
-    doc.text(`Reg #: ${tpl.regNumberOverride || doctor.regNumber || 'DENT-12345'}`, pageWidth - margin, headerRightY, { align: 'right' });
-  }
-
-  currentY = Math.max(currentY + 4, headerRightY + 8);
-
-  // Divider Line
-  doc.setDrawColor(226, 232, 240); // slate-200
-  doc.setLineWidth(0.5);
-  doc.line(margin, currentY, pageWidth - margin, currentY);
-  currentY += 6;
-
-  // 2. Patient & Rx Info Card
-  const cardStartY = currentY;
-  const cardPadding = 4;
-
-  doc.setFillColor(248, 250, 252); // slate-50
+  // Right Side - Doctor Info
+  const docRightX = pageWidth - margin;
+  const docName = doctor.name ? (doctor.name.startsWith('Dr.') ? doctor.name : `Dr. ${doctor.name}`) : 'Dr. V. Radhakrishnan';
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
+  doc.setTextColor(DARK_NAVY.r, DARK_NAVY.g, DARK_NAVY.b);
+  doc.text(docName, docRightX, 16, { align: 'right' });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(SLATE.r, SLATE.g, SLATE.b);
+  doc.text(doctor.qualifications || 'B.D.S. - Dental Surgeon', docRightX, 20.5, { align: 'right' });
+
+  const regNum = doctor.regNumber || '25927';
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(PRIMARY.r, PRIMARY.g, PRIMARY.b);
+  doc.text(`Reg No: ${regNum}`, docRightX, 25, { align: 'right' });
+
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(7.5);
   doc.setTextColor(100, 116, 139);
-  doc.text('PATIENT & CLINICAL DETAILS', margin + cardPadding, currentY + 5);
+  doc.text('Dental EMR Verified', docRightX, 29, { align: 'right' });
 
-  currentY += 8;
-  doc.setDrawColor(226, 232, 240);
-  doc.line(margin + cardPadding, currentY, pageWidth - margin - cardPadding, currentY);
-  currentY += 5;
+  // Divider Rule under Header
+  doc.setDrawColor(BORDER_CLR.r, BORDER_CLR.g, BORDER_CLR.b);
+  doc.setLineWidth(0.5);
+  doc.line(margin, 34, pageWidth - margin, 34);
 
-  doc.setFontSize(10);
+  // 3. Patient Information Card (y: 38mm to 56mm)
+  const ptBoxY = 37;
+  const ptBoxH = 18;
+  doc.setFillColor(LIGHT_BG.r, LIGHT_BG.g, LIGHT_BG.b);
+  doc.setDrawColor(PRIMARY.r, PRIMARY.g, PRIMARY.b);
+  doc.setLineWidth(0.4);
+  doc.roundedRect(margin, ptBoxY, contentWidth, ptBoxH, 2, 2, 'FD');
 
-  // Row 1: Patient Name & MRN & Date
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(71, 85, 105);
-  doc.text('Patient Name: ', margin + cardPadding, currentY);
+  const ptName = patient?.name || rx.patientName || 'ZAID KHAN';
+  const ptAge = patient?.age ? `${patient.age} Yrs` : '28 Yrs';
+  const ptGender = patient?.gender || 'Male';
+  const ptMrn = patient?.mrn || patient?.id || rx.id || 'RX-1001';
+  const rxDateStr = rx.date ? formatDate(rx.date) : formatDate(new Date().toISOString());
+
+  // Row 1 of Patient Card
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(15, 23, 42);
-  const ptName = rx.patientName || patient?.name || 'Patient';
-  doc.text(ptName, margin + cardPadding + 26, currentY);
-
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(71, 85, 105);
-  doc.text('MRN: ', margin + 95, currentY);
+  doc.setFontSize(8);
+  doc.setTextColor(PRIMARY.r, PRIMARY.g, PRIMARY.b);
+  doc.text('Patient Name:', margin + 4, ptBoxY + 6);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(15, 23, 42);
-  doc.text(patient?.mrn || 'N/A', margin + 107, currentY);
+  doc.setFontSize(9);
+  doc.setTextColor(DARK_NAVY.r, DARK_NAVY.g, DARK_NAVY.b);
+  doc.text(ptName, margin + 26, ptBoxY + 6);
 
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(71, 85, 105);
-  doc.text('Rx Date: ', margin + 145, currentY);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(15, 23, 42);
-  doc.text(formatDate(rx.date), margin + 162, currentY);
-
-  currentY += 6;
-
-  // Row 2: Age/Gender & Mobile & Next Visit
+  doc.setFontSize(8);
+  doc.setTextColor(PRIMARY.r, PRIMARY.g, PRIMARY.b);
+  doc.text('Age / Gender:', margin + 85, ptBoxY + 6);
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(71, 85, 105);
-  doc.text('Age / Gender: ', margin + cardPadding, currentY);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(15, 23, 42);
-  doc.text(patient ? `${patient.age} Yrs / ${patient.gender}` : 'N/A', margin + cardPadding + 26, currentY);
+  doc.setFontSize(8.5);
+  doc.setTextColor(DARK_NAVY.r, DARK_NAVY.g, DARK_NAVY.b);
+  doc.text(`${ptAge} / ${ptGender}`, margin + 107, ptBoxY + 6);
 
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(PRIMARY.r, PRIMARY.g, PRIMARY.b);
+  doc.text('Date:', margin + 145, ptBoxY + 6);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(DARK_NAVY.r, DARK_NAVY.g, DARK_NAVY.b);
+  doc.text(rxDateStr, margin + 155, ptBoxY + 6);
+
+  // Row 2 of Patient Card
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(PRIMARY.r, PRIMARY.g, PRIMARY.b);
+  doc.text('MRN / Rx No:', margin + 4, ptBoxY + 13);
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(71, 85, 105);
-  doc.text('Mobile: ', margin + 95, currentY);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(15, 23, 42);
-  doc.text(patient?.phone || 'N/A', margin + 110, currentY);
+  doc.setFontSize(8);
+  doc.setTextColor(DARK_NAVY.r, DARK_NAVY.g, DARK_NAVY.b);
+  doc.text(ptMrn, margin + 26, ptBoxY + 13);
 
-  if (rx.nextVisitDate) {
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(71, 85, 105);
-    doc.text('Follow-up: ', margin + 145, currentY);
+  const phoneVal = patient?.phone || doctor.clinicPhone || '';
+  if (phoneVal) {
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(59, 167, 245);
-    doc.text(formatDate(rx.nextVisitDate), margin + 165, currentY);
+    doc.setFontSize(8);
+    doc.setTextColor(PRIMARY.r, PRIMARY.g, PRIMARY.b);
+    doc.text('Contact:', margin + 85, ptBoxY + 13);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(DARK_NAVY.r, DARK_NAVY.g, DARK_NAVY.b);
+    doc.text(phoneVal, margin + 107, ptBoxY + 13);
   }
 
-  currentY += 6;
+  let currentY = 60;
 
-  // Row 3: Chief Complaint & Diagnosis
-  if (rx.chiefComplaint) {
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(71, 85, 105);
-    doc.text('Chief Complaint: ', margin + cardPadding, currentY);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(15, 23, 42);
-    doc.text(rx.chiefComplaint, margin + cardPadding + 30, currentY);
-    currentY += 6;
+  // 4. Clinical Details (Chief Complaint & Diagnosis)
+  if (rx.chiefComplaint || rx.diagnosis) {
+    doc.setFillColor(241, 245, 249);
+    doc.setDrawColor(203, 213, 225);
+    doc.setLineWidth(0.3);
+    const notesH = (rx.chiefComplaint && rx.diagnosis) ? 14 : 9;
+    doc.roundedRect(margin, currentY, contentWidth, notesH, 1.5, 1.5, 'FD');
+
+    let noteY = currentY + 5;
+    if (rx.chiefComplaint) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(PRIMARY.r, PRIMARY.g, PRIMARY.b);
+      doc.text('Chief Complaint:', margin + 4, noteY);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(DARK_NAVY.r, DARK_NAVY.g, DARK_NAVY.b);
+      doc.text(rx.chiefComplaint, margin + 30, noteY);
+      noteY += 5;
+    }
+    if (rx.diagnosis) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(PRIMARY.r, PRIMARY.g, PRIMARY.b);
+      doc.text('Diagnosis:', margin + 4, noteY);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(DARK_NAVY.r, DARK_NAVY.g, DARK_NAVY.b);
+      doc.text(rx.diagnosis, margin + 30, noteY);
+    }
+    currentY += notesH + 5;
   }
 
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(71, 85, 105);
-  doc.text('Diagnosis: ', margin + cardPadding, currentY);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(15, 23, 42);
-  doc.text(rx.diagnosis || 'Dental Condition', margin + cardPadding + 20, currentY);
-
-  currentY += 6;
-
-  const cardHeight = currentY - cardStartY + 2;
-  doc.rect(margin, cardStartY, contentWidth, cardHeight, 'S');
-
-  currentY += 8;
-
-  // 3. Rx Symbol & Medications Table
-  doc.setFont('helvetica', 'bold');
+  // 5. Rx Symbol
+  doc.setFont('times', 'bold');
   doc.setFontSize(22);
-  doc.setTextColor(15, 23, 42);
-  doc.text('Rx', margin, currentY);
-  currentY += 4;
+  doc.setTextColor(PRIMARY.r, PRIMARY.g, PRIMARY.b);
+  doc.text('Rx', margin, currentY + 2);
 
-  const tableStartY = currentY;
+  currentY += 7;
+
+  // 6. Medicines Table Header
+  const tableY = currentY;
   const colX = {
     num: margin + 3,
     name: margin + 12,
-    dosage: margin + 80,
+    dosage: margin + 85,
     freq: margin + 120,
-    duration: pageWidth - margin - 3,
+    duration: margin + 160,
   };
 
-  // Header
-  doc.setFillColor(241, 245, 249); // slate-100
-  doc.rect(margin, tableStartY, contentWidth, 8, 'F');
-  doc.setDrawColor(203, 213, 225);
-  doc.rect(margin, tableStartY, contentWidth, 8, 'S');
+  doc.setFillColor(TEAL_HDR.r, TEAL_HDR.g, TEAL_HDR.b);
+  doc.roundedRect(margin, tableY, contentWidth, 7, 1, 1, 'F');
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.setTextColor(51, 65, 85);
+  doc.setFontSize(8);
+  doc.setTextColor(255, 255, 255);
+  doc.text('#', colX.num, tableY + 4.8);
+  doc.text('MEDICINE NAME & DOSAGE', colX.name, tableY + 4.8);
+  doc.text('DOSAGE', colX.dosage, tableY + 4.8);
+  doc.text('FREQUENCY / TIMING', colX.freq, tableY + 4.8);
+  doc.text('DURATION', colX.duration, tableY + 4.8);
 
-  doc.text('#', colX.num, tableStartY + 5.5);
-  doc.text('Medication & Generic Name', colX.name, tableStartY + 5.5);
-  doc.text('Dosage', colX.dosage, tableStartY + 5.5);
-  doc.text('Frequency / Timing', colX.freq, tableStartY + 5.5);
-  doc.text('Duration', colX.duration, tableStartY + 5.5, { align: 'right' });
+  currentY = tableY + 7;
 
-  currentY += 8;
-
-  // Table Rows
+  // 7. Medicines Rows
   rx.medicines.forEach((med, idx) => {
-    const rowY = currentY + 5.5;
+    const isEven = idx % 2 === 0;
+    const rowH = med.dosage ? 11 : 8.5;
 
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.setTextColor(100, 116, 139);
-    doc.text(String(idx + 1), colX.num, rowY);
+    if (isEven) {
+      doc.setFillColor(255, 255, 255);
+    } else {
+      doc.setFillColor(248, 250, 252);
+    }
+    doc.rect(margin, currentY, contentWidth, rowH, 'F');
 
+    // Bottom border for row
+    doc.setDrawColor(241, 245, 249);
+    doc.setLineWidth(0.3);
+    doc.line(margin, currentY + rowH, margin + contentWidth, currentY + rowH);
+
+    // Number
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(15, 23, 42);
-    doc.text(med.name, colX.name, rowY);
+    doc.setFontSize(8);
+    doc.setTextColor(SLATE.r, SLATE.g, SLATE.b);
+    doc.text(`${idx + 1}.`, colX.num, currentY + 5.2);
 
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(71, 85, 105);
-    doc.text(med.dosage || '1 Tablet', colX.dosage, rowY);
-
-    const timingStr = med.timing ? `${med.frequency} (${med.timing})` : med.frequency;
-    doc.text(timingStr, colX.freq, rowY);
-
+    // Name
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(15, 23, 42);
-    doc.text(med.duration || '5 Days', colX.duration, rowY, { align: 'right' });
+    doc.setFontSize(8.5);
+    doc.setTextColor(DARK_NAVY.r, DARK_NAVY.g, DARK_NAVY.b);
+    doc.text(med.name, colX.name, currentY + 5.2, { maxWidth: 70 });
 
-    currentY += 8;
-    doc.setDrawColor(226, 232, 240);
-    doc.line(margin, currentY, pageWidth - margin, currentY);
+    if (med.dosage) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(SLATE.r, SLATE.g, SLATE.b);
+      doc.text(`Dose: ${med.dosage}`, colX.name, currentY + 9.2);
+    }
+
+    // Dosage Column
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(DARK_NAVY.r, DARK_NAVY.g, DARK_NAVY.b);
+    doc.text(med.dosage || '1 Tab', colX.dosage, currentY + 5.2);
+
+    // Frequency
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(PRIMARY.r, PRIMARY.g, PRIMARY.b);
+    const freqTiming = med.timing ? `${med.frequency} (${med.timing})` : med.frequency;
+    doc.text(freqTiming, colX.freq, currentY + 5.2, { maxWidth: 38 });
+
+    // Duration
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(DARK_NAVY.r, DARK_NAVY.g, DARK_NAVY.b);
+    doc.text(med.duration || '5 Days', colX.duration, currentY + 5.2);
+
+    currentY += rowH;
   });
 
-  currentY += 6;
+  currentY += 4;
 
-  // 4. Special Instructions & Advice Box
+  // 8. Special Instructions / Doctor Advice Callout Box
   if (rx.specialInstructions) {
-    const advStartY = currentY;
-    doc.setFillColor(254, 243, 199); // amber-50
-    doc.setDrawColor(252, 211, 77); // amber-300
+    doc.setFillColor(AMBER_BG.r, AMBER_BG.g, AMBER_BG.b);
+    doc.setDrawColor(AMBER_BRD.r, AMBER_BRD.g, AMBER_BRD.b);
+    doc.setLineWidth(0.4);
+
+    const adviceText = rx.specialInstructions;
+    const splitAdvice = doc.splitTextToSize(adviceText, contentWidth - 10);
+    const boxH = Math.max(16, 10 + splitAdvice.length * 4);
+
+    doc.roundedRect(margin, currentY, contentWidth, boxH, 2, 2, 'FD');
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
-    doc.setTextColor(180, 83, 9); // amber-700
-    doc.text('SPECIAL INSTRUCTIONS / ADVICE:', margin + 4, currentY + 5);
+    doc.setFontSize(8);
+    doc.setTextColor(180, 83, 9); // Amber-700
+    doc.text('DOCTOR ADVICE / SPECIAL INSTRUCTIONS:', margin + 4, currentY + 5.5);
 
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(120, 53, 15);
-    doc.text(rx.specialInstructions, margin + 4, currentY + 11);
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(8);
+    doc.setTextColor(120, 53, 15); // Amber-900
+    doc.text(splitAdvice, margin + 4, currentY + 10.5);
 
-    const advHeight = 16;
-    doc.roundedRect(margin, advStartY, contentWidth, advHeight, 2, 2, 'FD');
-
-    currentY += advHeight + 6;
+    currentY += boxH + 4;
   }
 
-  // 5. Doctor Signature Line & Footer
-  const footerY = pageHeight - 25;
+  // 9. Follow-Up Date (if specified)
+  if (rx.nextVisitDate) {
+    doc.setFillColor(240, 249, 255);
+    doc.setDrawColor(PRIMARY.r, PRIMARY.g, PRIMARY.b);
+    doc.setLineWidth(0.3);
+    doc.roundedRect(margin, currentY, 80, 7, 1.5, 1.5, 'FD');
 
-  doc.setDrawColor(148, 163, 184);
-  doc.line(pageWidth - margin - 50, footerY, pageWidth - margin, footerY);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(PRIMARY.r, PRIMARY.g, PRIMARY.b);
+    doc.text(`Next Visit / Follow-up: ${formatDate(rx.nextVisitDate)}`, margin + 4, currentY + 4.8);
+
+    currentY += 10;
+  }
+
+  // 10. Footer Section (Fixed Position near bottom of A4)
+  const footerY = 252;
+
+  // Divider line
+  doc.setDrawColor(BORDER_CLR.r, BORDER_CLR.g, BORDER_CLR.b);
+  doc.setLineWidth(0.5);
+  doc.line(margin, footerY, pageWidth - margin, footerY);
+
+  // Left Footer - EMR Badge & Hygiene Notice
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(PRIMARY.r, PRIMARY.g, PRIMARY.b);
+  doc.text('Digital EMR Certified Prescription', margin, footerY + 6);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(SLATE.r, SLATE.g, SLATE.b);
+  doc.text('* Please complete the full course of antibiotics as prescribed.', margin, footerY + 10);
+  doc.text('* In case of allergy or adverse reaction, contact clinic immediately.', margin, footerY + 14);
+
+  // Right Footer - Signature Block
+  const sigX = pageWidth - margin - 50;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(DARK_NAVY.r, DARK_NAVY.g, DARK_NAVY.b);
+  doc.text(docName, sigX + 25, footerY + 16, { align: 'center' });
+
+  doc.setDrawColor(DARK_NAVY.r, DARK_NAVY.g, DARK_NAVY.b);
+  doc.setLineWidth(0.4);
+  doc.line(sigX, footerY + 18, sigX + 50, footerY + 18);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(SLATE.r, SLATE.g, SLATE.b);
+  doc.text('Doctor Signature & Stamp', sigX + 25, footerY + 22, { align: 'center' });
+
+  // 11. Bottom Decorative Solid Footer Bar
+  const bottomBarY = 288;
+  doc.setFillColor(PRIMARY.r, PRIMARY.g, PRIMARY.b);
+  doc.rect(0, bottomBarY, pageWidth, 9, 'F');
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.setTextColor(15, 23, 42);
-  doc.text(`Dr. ${doctor.name}`, pageWidth - margin - 25, footerY + 4, { align: 'center' });
-  doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
-  doc.setTextColor(100, 116, 139);
-  doc.text('Authorized Medical Practitioner', pageWidth - margin - 25, footerY + 8, { align: 'center' });
-
-  // Page Footer
-  doc.setDrawColor(226, 232, 240);
-  doc.line(margin, footerY + 12, pageWidth - margin, footerY + 12);
-
-  doc.setFontSize(8);
-  doc.setTextColor(148, 163, 184);
-  doc.text(
-    `This is a digitally generated prescription issued by ${doctor.clinicName}. Valid without physical signature.`,
-    pageWidth / 2,
-    footerY + 16,
-    { align: 'center' }
-  );
+  doc.setTextColor(255, 255, 255);
+  const footerContact = `www.rkdentalclinic.com  |  Emergency Hotline: ${doctor.clinicPhone || '8883261285'}`;
+  doc.text(footerContact, pageWidth / 2, bottomBarY + 5.5, { align: 'center' });
 
   return doc.output('blob');
 }

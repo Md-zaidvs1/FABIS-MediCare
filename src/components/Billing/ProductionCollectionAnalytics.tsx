@@ -17,7 +17,7 @@ export const ProductionCollectionAnalytics: React.FC<ProductionCollectionAnalyti
   let totalActualCollected = 0;
   let totalBalanceDue = 0;
 
-  invoices.forEach((inv) => {
+  (invoices || []).forEach((inv) => {
     totalInvoicedProduction += inv.netTotal || 0;
     totalActualCollected += inv.paidAmount || 0;
     totalBalanceDue += inv.balanceDue || 0;
@@ -32,9 +32,9 @@ export const ProductionCollectionAnalytics: React.FC<ProductionCollectionAnalyti
     Insurance: 0,
   };
 
-  invoices.forEach((inv) => {
+  (invoices || []).forEach((inv) => {
     if (inv.paymentHistory) {
-      inv.paymentHistory.forEach((pm) => {
+      (inv.paymentHistory || []).forEach((pm) => {
         methodTotals[pm.method] = (methodTotals[pm.method] || 0) + pm.amount;
       });
     } else if (inv.paymentMethod) {

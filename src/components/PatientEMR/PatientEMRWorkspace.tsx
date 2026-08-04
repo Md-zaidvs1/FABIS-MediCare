@@ -21,9 +21,8 @@ import { SurfaceSelector } from '../TeethChart/SurfaceSelector';
 import { PerioChartModule } from '../TeethChart/PerioChartModule';
 import { SOAPTemplatesModal } from './SOAPTemplatesModal';
 import { PhasedTreatmentPlan } from './PhasedTreatmentPlan';
-import { DocumentVaultModule } from './DocumentVaultModule';
 import { formatCurrency, formatDate, CONDITION_CONFIG, getToothName, getLastVisitAndTreatment } from '../../utils/formatters';
-import { shareInvoicePdf, sharePrescriptionPdf } from '../../utils/pdfShare';
+import { shareInvoicePdf, sharePrescriptionPdf, generateInvoiceThermalJsPdf, printPdfBlob } from '../../utils/pdfShare';
 import { QUICK_DIAGNOSES, QUICK_TREATMENTS, DEFAULT_TREATMENT_TEMPLATES } from '../../data/initialData';
 import { 
   getStoredCustomDiagnoses, 
@@ -422,7 +421,7 @@ export const PatientEMRWorkspace: React.FC<PatientEMRWorkspaceProps> = ({
   );
 
   const handleApplyTreatmentTemplate = (template: TreatmentTemplate) => {
-    template.items.forEach((item) => {
+    (template.items || []).forEach((item) => {
       onAddTreatmentPlan(patient.id, {
         procedureName: item.procedureName,
         category: item.category,
@@ -484,7 +483,7 @@ export const PatientEMRWorkspace: React.FC<PatientEMRWorkspaceProps> = ({
   };
 
   // Balance calculation
-  const totalBalanceDue = patient.invoices.reduce((sum, inv) => sum + inv.balanceDue, 0);
+  const totalBalanceDue = (patient.invoices || []).reduce((sum, inv) => sum + inv.balanceDue, 0);
 
   // Patient Visit History derived
   const { lastVisitDate, lastTxName } = getLastVisitAndTreatment(patient);
@@ -666,11 +665,10 @@ export const PatientEMRWorkspace: React.FC<PatientEMRWorkspaceProps> = ({
             { id: 'overview', label: 'Overview & Vitals', icon: User },
             { id: 'teethMap', label: 'Dental Chart & Tooth Desk', icon: Activity },
             { id: 'perio', label: '6-Point Perio Chart', icon: Stethoscope },
-            { id: 'treatments', label: 'Treatment Plans', icon: Layers, count: patient.treatmentPlans.length },
-            { id: 'prescriptions', label: 'Rx Prescriptions', icon: FileText, count: patient.prescriptions.length },
-            { id: 'invoices', label: 'Invoices & Billing', icon: Receipt, count: patient.invoices.length },
+            { id: 'treatments', label: 'Treatment Plans', icon: Layers, count: (patient.treatmentPlans || []).length },
+            { id: 'prescriptions', label: 'Rx Prescriptions', icon: FileText, count: (patient.prescriptions || []).length },
+            { id: 'invoices', label: 'Invoices & Billing', icon: Receipt, count: (patient.invoices || []).length },
             { id: 'timeline', label: 'Visit History Timeline', icon: Clock },
-            { id: 'media', label: 'Clinical Vault & Media', icon: ImageIcon, count: patient.media?.length || 0 },
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -919,7 +917,7 @@ export const PatientEMRWorkspace: React.FC<PatientEMRWorkspaceProps> = ({
                   Total Dues: {formatCurrency(totalBalanceDue)}
                 </span>
               </div>
-              {patient.invoices.map((inv, idx) => (
+              {(patient.invoices || []).map((inv, idx) => (
                 <div
                   key={`${inv.id}-${idx}`}
                   onClick={() => onViewInvoiceModal(inv)}
@@ -1768,12 +1766,12 @@ export const PatientEMRWorkspace: React.FC<PatientEMRWorkspaceProps> = ({
           />
 
           <div className="space-y-4">
-            {patient.prescriptions.length === 0 ? (
+            {(patient.prescriptions || []).length === 0 ? (
               <div className="p-8 text-center bg-white rounded-2xl border border-zinc-200 text-zinc-500 shadow-sm">
                 No prescriptions issued yet. Click "+ Create New Rx" above.
               </div>
             ) : (
-              patient.prescriptions.map((rx) => (
+              (patient.prescriptions || []).map((rx) => (
                 <div
                   key={rx.id}
                   className="bg-white p-5 rounded-2xl border border-zinc-200 shadow-sm space-y-3 text-zinc-900"
@@ -1870,7 +1868,7 @@ export const PatientEMRWorkspace: React.FC<PatientEMRWorkspaceProps> = ({
           </div>
 
           <div className="space-y-3">
-            {patient.invoices.map((inv, idx) => (
+            {(patient.invoices || []).map((inv, idx) => (
               <div
                 key={`${inv.id}-${idx}`}
                 className="bg-white p-4.5 rounded-2xl border border-zinc-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-[#D4AF37] transition-all text-zinc-900"
@@ -1891,15 +1889,30 @@ export const PatientEMRWorkspace: React.FC<PatientEMRWorkspaceProps> = ({
                 </div>
 
                 <div className="flex items-center gap-2 flex-wrap">
+                  {/* Direct 80mm Thermal Receipt Button */}
+                  <button
+                    onClick={() => {
+                      const pdfBlob = generateInvoiceThermalJsPdf(inv, doctor, patient, getStoredCustomClinicLogo());
+                      if (pdfBlob) printPdfBlob(pdfBlob);
+                    }}
+                    className="px-3 py-2 min-h-[38px] rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-black shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
+                    title="Direct 80mm Thermal Receipt Print"
+                  >
+                    <Printer className="w-3.5 h-3.5 text-white" />
+                    <span>80mm Thermal</span>
+                  </button>
+
+                  {/* Standard A4 Print */}
                   <button
                     onClick={() => onViewInvoiceModal(inv)}
                     className="px-3 py-2 min-h-[38px] rounded-xl bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
-                    title="Print Invoice"
+                    title="Print Invoice & Format Switcher"
                   >
                     <Printer className="w-3.5 h-3.5 text-[#3BA7F5]" />
-                    <span>Print Invoice</span>
+                    <span>A4 Print</span>
                   </button>
 
+                  {/* Share 80mm Thermal via WhatsApp */}
                   <button
                     onClick={() =>
                       shareInvoicePdf({
@@ -1907,13 +1920,14 @@ export const PatientEMRWorkspace: React.FC<PatientEMRWorkspaceProps> = ({
                         doctor,
                         patient,
                         customLogo: getStoredCustomClinicLogo(),
+                        format: 'thermal',
                       })
                     }
                     className="px-3 py-2 min-h-[38px] rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold border border-emerald-200 transition-all cursor-pointer flex items-center gap-1.5"
-                    title="Share invoice PDF via WhatsApp"
+                    title="Share 80mm thermal receipt via WhatsApp"
                   >
                     <span className="text-xs">💬</span>
-                    <span>Share via WhatsApp</span>
+                    <span>WhatsApp (80mm)</span>
                   </button>
 
                   <button
@@ -1921,8 +1935,8 @@ export const PatientEMRWorkspace: React.FC<PatientEMRWorkspaceProps> = ({
                     className="px-3 py-2 min-h-[38px] rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-800 text-xs font-bold border border-zinc-200 transition-all cursor-pointer flex items-center gap-1.5"
                     title="View full receipt details"
                   >
-                    <Receipt className="w-3.5 h-3.5 text-amber-600" />
-                    <span>View Receipt</span>
+                    <Receipt className="w-3.5 h-3.5 text-[#3BA7F5]" />
+                    <span>View</span>
                   </button>
                 </div>
               </div>
@@ -1944,8 +1958,8 @@ export const PatientEMRWorkspace: React.FC<PatientEMRWorkspaceProps> = ({
 
           <div className="relative pl-6 border-l-2 border-zinc-200 space-y-8">
             {/* Combine prescriptions & invoices into chronological timeline */}
-            {patient.prescriptions.concat(
-              patient.invoices.map((inv) => ({
+            {(patient.prescriptions || []).concat(
+              (patient.invoices || []).map((inv) => ({
                 id: inv.id,
                 patientId: inv.patientId,
                 doctorName: '',
@@ -1984,16 +1998,6 @@ export const PatientEMRWorkspace: React.FC<PatientEMRWorkspaceProps> = ({
             ))}
           </div>
         </div>
-      )}
-
-      {/* Tab 7: Clinical Media, X-Rays & Document Vault */}
-      {activeTab === 'media' && (
-        <DocumentVaultModule
-          patient={patient}
-          onUpdateMedia={(media) => {
-            patient.media = media;
-          }}
-        />
       )}
 
       {/* Lightbox Image Modal */}

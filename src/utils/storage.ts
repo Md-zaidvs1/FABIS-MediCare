@@ -1,5 +1,6 @@
-import { Patient, DoctorProfile, UserRole, UserCredentials, ThemePalette, VitalsLogRecord } from '../types';
-import { INITIAL_PATIENTS, DEFAULT_DOCTOR } from '../data/initialData';
+import { Patient, DoctorProfile, UserRole, UserCredentials, ThemePalette, VitalsLogRecord, ChairStatus, DashboardPersonalizationSettings } from '../types';
+import { INITIAL_PATIENTS, DEFAULT_DOCTOR, INITIAL_CHAIR_STATUSES } from '../data/initialData';
+import { formatTodayISO } from './formatters';
 
 const STORAGE_KEYS = {
   PATIENTS: 'fabis_medicare_patients_v1',
@@ -18,7 +19,58 @@ const STORAGE_KEYS = {
   CUSTOM_BILL_TEMPLATES: 'fabis_medicare_custom_bill_templates_v1',
   CUSTOM_CLINIC_LOGO: 'customClinicLogo',
   CUSTOM_APP_ICON: 'customAppIcon',
+  CHAIRS: 'fabis_medicare_chairs_v1',
+  DASHBOARD_SETTINGS: 'fabis_medicare_dashboard_settings_v1',
 };
+
+export const DEFAULT_DASHBOARD_SETTINGS: DashboardPersonalizationSettings = {
+  welcomeTitle: 'Welcome back',
+  welcomeMessage: 'Here is your clinical overview for today. Monitor active operatories, patient queues, and daily targets.',
+  motivationalQuote: 'Every smile you restore brings confidence, healing, and wellness to your community.',
+  clinicNameOverride: '',
+  showActiveChairs: true,
+  showTodayAppointments: true,
+  showWaitingPatients: true,
+  showTodayRevenue: true,
+  backgroundType: 'gradient',
+  backgroundColor: '#0f172a',
+  backgroundGradient: 'from-slate-900 via-indigo-950 to-slate-900',
+  backgroundImageUrl: '',
+  cardIcon: 'Sparkles',
+};
+
+export const getStoredDashboardSettings = (): DashboardPersonalizationSettings => {
+  try {
+    const data = localStorage.getItem(STORAGE_KEYS.DASHBOARD_SETTINGS);
+    if (data) {
+      const parsed = JSON.parse(data);
+      return { ...DEFAULT_DASHBOARD_SETTINGS, ...parsed };
+    }
+  } catch (err) {
+    console.error('Error reading dashboard settings storage', err);
+  }
+  return DEFAULT_DASHBOARD_SETTINGS;
+};
+
+export const saveStoredDashboardSettings = (settings: DashboardPersonalizationSettings): void => {
+  try {
+    localStorage.setItem(STORAGE_KEYS.DASHBOARD_SETTINGS, JSON.stringify(settings));
+    window.dispatchEvent(new Event('dashboard-settings-updated'));
+  } catch (err) {
+    console.error('Error saving dashboard settings storage', err);
+  }
+};
+
+export const resetDashboardSettings = (): DashboardPersonalizationSettings => {
+  try {
+    localStorage.removeItem(STORAGE_KEYS.DASHBOARD_SETTINGS);
+    window.dispatchEvent(new Event('dashboard-settings-updated'));
+  } catch (err) {
+    console.error('Error resetting dashboard settings storage', err);
+  }
+  return DEFAULT_DASHBOARD_SETTINGS;
+};
+
 
 export const DEFAULT_CREDENTIALS: UserCredentials = {
   adminUsername: 'admin@fabismedicare.com',
@@ -96,16 +148,29 @@ export const applyThemeToDocument = (theme: ThemePalette): void => {
 export const getStoredDoctor = (): DoctorProfile => {
   try {
     const data = localStorage.getItem(STORAGE_KEYS.DOCTOR);
-    if (data) return JSON.parse(data);
+    const customLogo = getStoredCustomClinicLogo();
+    if (data) {
+      const parsed = JSON.parse(data);
+      if (customLogo) {
+        parsed.logoUrl = customLogo;
+      }
+      return parsed;
+    }
   } catch (err) {
     console.error('Error reading doctor storage', err);
   }
-  return DEFAULT_DOCTOR;
+  const customLogo = getStoredCustomClinicLogo();
+  return customLogo ? { ...DEFAULT_DOCTOR, logoUrl: customLogo } : DEFAULT_DOCTOR;
 };
 
 export const saveDoctor = (doctor: DoctorProfile): void => {
   try {
-    localStorage.setItem(STORAGE_KEYS.DOCTOR, JSON.stringify(doctor));
+    const customLogo = doctor.logoUrl || getStoredCustomClinicLogo();
+    const updatedDoctor = { ...doctor, logoUrl: customLogo || undefined };
+    localStorage.setItem(STORAGE_KEYS.DOCTOR, JSON.stringify(updatedDoctor));
+    if (doctor.logoUrl) {
+      saveCustomClinicLogo(doctor.logoUrl);
+    }
   } catch (err) {
     console.error('Error saving doctor storage', err);
   }
@@ -117,13 +182,19 @@ export const getStoredPatients = (): Patient[] => {
     if (data) {
       const parsed = JSON.parse(data);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        const todayIso = formatTodayISO();
+        const storedTodayAptsCount = parsed
+          .flatMap((p: Patient) => p.appointments || [])
+          .filter((a: any) => a.date === todayIso).length;
+        if (storedTodayAptsCount === 10) {
+          return parsed;
+        }
       }
     }
   } catch (err) {
     console.error('Error reading patients storage', err);
   }
-  // Default fallback
+  // Default fallback or auto-refresh for 10 dummy appointments testing
   savePatients(INITIAL_PATIENTS);
   return INITIAL_PATIENTS;
 };
@@ -324,9 +395,21 @@ export const saveCustomClinicLogo = (logoBase64: string | null): void => {
     if (logoBase64) {
       localStorage.setItem('customClinicLogo', logoBase64);
       localStorage.setItem(STORAGE_KEYS.CUSTOM_CLINIC_LOGO, logoBase64);
+      const data = localStorage.getItem(STORAGE_KEYS.DOCTOR);
+      if (data) {
+        const parsed = JSON.parse(data);
+        parsed.logoUrl = logoBase64;
+        localStorage.setItem(STORAGE_KEYS.DOCTOR, JSON.stringify(parsed));
+      }
     } else {
       localStorage.removeItem('customClinicLogo');
       localStorage.removeItem(STORAGE_KEYS.CUSTOM_CLINIC_LOGO);
+      const data = localStorage.getItem(STORAGE_KEYS.DOCTOR);
+      if (data) {
+        const parsed = JSON.parse(data);
+        delete parsed.logoUrl;
+        localStorage.setItem(STORAGE_KEYS.DOCTOR, JSON.stringify(parsed));
+      }
     }
   } catch (err) {
     console.error('Error saving custom clinic logo', err);
@@ -362,6 +445,9 @@ export const resetCustomBranding = (): void => {
 };
 
 export const resetToDemoData = (): { doctor: DoctorProfile; patients: Patient[] } => {
+  const preservedLogo = getStoredCustomClinicLogo();
+  const preservedIcon = getStoredCustomAppIcon();
+
   localStorage.removeItem(STORAGE_KEYS.PATIENTS);
   localStorage.removeItem(STORAGE_KEYS.DOCTOR);
   localStorage.removeItem(STORAGE_KEYS.CUSTOM_DIAGNOSES);
@@ -370,9 +456,20 @@ export const resetToDemoData = (): { doctor: DoctorProfile; patients: Patient[] 
   localStorage.removeItem(STORAGE_KEYS.DELETED_PREDEFINED_TREATMENTS);
   localStorage.removeItem(STORAGE_KEYS.DELETED_PREDEFINED_MEDICINES);
   localStorage.removeItem(STORAGE_KEYS.CUSTOM_MEDICINES);
+  localStorage.removeItem(STORAGE_KEYS.CHAIRS);
+
   savePatients(INITIAL_PATIENTS);
-  saveDoctor(DEFAULT_DOCTOR);
-  return { doctor: DEFAULT_DOCTOR, patients: INITIAL_PATIENTS };
+
+  if (preservedLogo) saveCustomClinicLogo(preservedLogo);
+  if (preservedIcon) saveCustomAppIcon(preservedIcon);
+
+  const resetDoctor = {
+    ...DEFAULT_DOCTOR,
+    logoUrl: preservedLogo || undefined,
+  };
+  saveDoctor(resetDoctor);
+
+  return { doctor: resetDoctor, patients: INITIAL_PATIENTS };
 };
 
 export const checkIsLoggedIn = (): boolean => {
@@ -458,5 +555,31 @@ export const saveVitalsLogForPatient = (patientMrn: string, newLog: VitalsLogRec
   } catch (err) {
     console.error('Error saving vitals log', err);
     return [];
+  }
+};
+
+export const getStoredChairs = (): ChairStatus[] => {
+  try {
+    const data = localStorage.getItem(STORAGE_KEYS.CHAIRS);
+    if (data !== null) {
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.error('Error reading chairs storage', err);
+  }
+  // Database has no chair records (or first installation): create and persist default chairs
+  saveStoredChairs(INITIAL_CHAIR_STATUSES);
+  return INITIAL_CHAIR_STATUSES;
+};
+
+export const saveStoredChairs = (chairs: ChairStatus[]): void => {
+  try {
+    localStorage.setItem(STORAGE_KEYS.CHAIRS, JSON.stringify(chairs));
+    window.dispatchEvent(new Event('fabis_chairs_updated'));
+  } catch (err) {
+    console.error('Error saving chairs storage', err);
   }
 };

@@ -28,7 +28,11 @@ export const formatTodayISO = (): string => {
 
 export function getLastVisitAndTreatment(patient: Patient) {
   // 1. Find last completed visit/appointment/invoice
-  const completedApts = patient.appointments.filter(
+  const appointments = patient.appointments || [];
+  const invoices = patient.invoices || [];
+  const treatmentPlans = patient.treatmentPlans || [];
+
+  const completedApts = appointments.filter(
     (a) => a.status === 'Completed' || a.status === 'In-Chair'
   );
   let lastVisitDate = 'No visits yet';
@@ -37,12 +41,12 @@ export function getLastVisitAndTreatment(patient: Patient) {
     lastVisitDate = formatDate(completedApts[0].date);
   } else if (patient.visitHistory && patient.visitHistory.length > 0) {
     lastVisitDate = formatDate(patient.visitHistory[0].date);
-  } else if (patient.invoices.length > 0) {
-    lastVisitDate = formatDate(patient.invoices[0].date);
+  } else if (invoices.length > 0) {
+    lastVisitDate = formatDate(invoices[0].date);
   }
 
   // 2. Find last COMPLETED treatment
-  const completedTreatments = patient.treatmentPlans.filter((tp) => tp.status === 'Completed');
+  const completedTreatments = treatmentPlans.filter((tp) => tp.status === 'Completed');
   let lastTxName = 'No completed treatment yet';
 
   if (completedTreatments.length > 0) {

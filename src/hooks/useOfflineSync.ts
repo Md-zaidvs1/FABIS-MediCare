@@ -9,6 +9,7 @@ import {
   dualSaveSnapshot,
 } from '../utils/indexedDBStorage';
 import { shouldShowBackupReminder } from '../utils/backupRestore';
+import { performSupabaseCloudBackup } from '../utils/supabaseCloudBackup';
 import { Patient } from '../types';
 
 export interface UseOfflineSyncReturn {
@@ -27,18 +28,29 @@ export const useOfflineSync = (patients: Patient[]): UseOfflineSyncReturn => {
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [showBackupReminder, setShowBackupReminder] = useState<boolean>(false);
 
-  // Initialize IndexedDB on mount & sync full patient snapshot
+  // Initialize IndexedDB on mount & trigger automatic Supabase cloud backup snapshot
   useEffect(() => {
     initIndexedDB()
       .then(() => {
         if (patients && patients.length > 0) {
           dualSaveSnapshot(patients);
+          performSupabaseCloudBackup(patients);
         }
       })
       .catch((err) => {
         console.warn('IndexedDB initialization notice:', err);
       });
   }, []);
+
+  // Background Auto-Sync to Supabase Cloud every 45 seconds
+  useEffect(() => {
+    const autoSyncInterval = setInterval(() => {
+      if (patients && patients.length > 0) {
+        performSupabaseCloudBackup(patients);
+      }
+    }, 45000);
+    return () => clearInterval(autoSyncInterval);
+  }, [patients]);
 
   // Check pending sync items count periodically
   const refreshPendingCount = useCallback(async () => {
@@ -120,6 +132,7 @@ export const useOfflineSync = (patients: Patient[]): UseOfflineSyncReturn => {
 
   const triggerDualSave = async (updatedPatients: Patient[]) => {
     await dualSaveSnapshot(updatedPatients);
+    await performSupabaseCloudBackup(updatedPatients);
   };
 
   return {

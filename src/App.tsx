@@ -157,7 +157,7 @@ export default function App() {
       Patient,
       'id' | 'mrn' | 'createdAt' | 'teethMap' | 'treatmentPlans' | 'prescriptions' | 'invoices' | 'appointments' | 'followUps' | 'media'
     >
-  ) => {
+  ): Patient => {
     const newId = `PAT-${100 + patients.length + 1}`;
     const newMrn = `FM-2026-${100 + patients.length + 1}`;
 
@@ -188,7 +188,7 @@ export default function App() {
     const updated = [newPatient, ...patients];
     updatePatients(updated);
     setSelectedPatientId(newId);
-    setActiveTab('patients');
+    return newPatient;
   };
 
   const handleUpdatePatientTeeth = (
@@ -229,9 +229,10 @@ export default function App() {
   ) => {
     const updated = patients.map((p) => {
       if (p.id !== patientId) return p;
+      const treatmentPlans = p.treatmentPlans || [];
 
       // Prevent active duplicates for the same tooth and procedure name
-      const isDuplicate = p.treatmentPlans.some(
+      const isDuplicate = treatmentPlans.some(
         (tp) =>
           (tp.toothNumber === plan.toothNumber || (!tp.toothNumber && !plan.toothNumber)) &&
           tp.procedureName.trim().toLowerCase() === plan.procedureName.trim().toLowerCase() &&
@@ -250,7 +251,7 @@ export default function App() {
 
       return {
         ...p,
-        treatmentPlans: [newPlanItem, ...p.treatmentPlans],
+        treatmentPlans: [newPlanItem, ...treatmentPlans],
       };
     });
     updatePatients(updated);
@@ -263,9 +264,10 @@ export default function App() {
   ) => {
     const updated = patients.map((p) => {
       if (p.id !== patientId) return p;
+      const treatmentPlans = p.treatmentPlans || [];
       return {
         ...p,
-        treatmentPlans: p.treatmentPlans.map((t) => (t.id === planId ? { ...t, status } : t)),
+        treatmentPlans: treatmentPlans.map((t) => (t.id === planId ? { ...t, status } : t)),
       };
     });
     updatePatients(updated);
@@ -278,9 +280,10 @@ export default function App() {
   ) => {
     const updated = patients.map((p) => {
       if (p.id !== patientId) return p;
+      const treatmentPlans = p.treatmentPlans || [];
       return {
         ...p,
-        treatmentPlans: p.treatmentPlans.map((t) => (t.id === planId ? { ...t, estimatedCost } : t)),
+        treatmentPlans: treatmentPlans.map((t) => (t.id === planId ? { ...t, estimatedCost } : t)),
       };
     });
     updatePatients(updated);
@@ -289,9 +292,10 @@ export default function App() {
   const handleDeleteTreatmentPlan = (patientId: string, planId: string) => {
     const updated = patients.map((p) => {
       if (p.id !== patientId) return p;
+      const treatmentPlans = p.treatmentPlans || [];
       return {
         ...p,
-        treatmentPlans: p.treatmentPlans.filter((t) => t.id !== planId),
+        treatmentPlans: treatmentPlans.filter((t) => t.id !== planId),
       };
     });
     updatePatients(updated);
@@ -312,15 +316,22 @@ export default function App() {
   };
 
   const handleBookAppointment = (appointment: Omit<Appointment, 'id'>) => {
+    const nowIso = new Date().toISOString();
     const newApt: Appointment = {
       ...appointment,
       id: `APT-${Date.now()}`,
+      createdAt: appointment.createdAt || nowIso,
+      updatedAt: nowIso,
+      checkInTime: appointment.status === 'Arrived' ? nowIso : appointment.checkInTime,
+      treatmentStartTime: (appointment.status === 'In-Chair' || appointment.status === 'In Consultation') ? nowIso : appointment.treatmentStartTime,
+      completedTime: appointment.status === 'Completed' ? nowIso : appointment.completedTime,
     };
     const updated = patients.map((p) => {
       if (p.id !== appointment.patientId) return p;
+      const appointments = p.appointments || [];
       return {
         ...p,
-        appointments: [newApt, ...p.appointments],
+        appointments: [newApt, ...appointments],
       };
     });
     updatePatients(updated);
@@ -330,12 +341,73 @@ export default function App() {
     appointmentId: string,
     status: Appointment['status']
   ) => {
+    const nowIso = new Date().toISOString();
     const updated = patients.map((p) => {
-      const aptExists = p.appointments.some((a) => a.id === appointmentId);
+      const appointments = p.appointments || [];
+      const aptExists = appointments.some((a) => a.id === appointmentId);
       if (!aptExists) return p;
       return {
         ...p,
-        appointments: p.appointments.map((a) => (a.id === appointmentId ? { ...a, status } : a)),
+        appointments: appointments.map((a) => {
+          if (a.id === appointmentId) {
+            const isCheckIn = status === 'Arrived';
+            const isStartingTreatment = status === 'In-Chair' || status === 'In Consultation';
+            const isCompleting = status === 'Completed';
+
+            const checkInTime = isCheckIn ? (a.checkInTime || nowIso) : a.checkInTime;
+            const treatmentStartTime = isStartingTreatment ? (a.treatmentStartTime || nowIso) : a.treatmentStartTime;
+            const completedTime = isCompleting ? (a.completedTime || nowIso) : a.completedTime;
+            const treatmentEndTime = isCompleting ? (a.treatmentEndTime || nowIso) : a.treatmentEndTime;
+
+            return {
+              ...a,
+              status,
+              checkInTime,
+              treatmentStartTime,
+              treatmentEndTime,
+              completedTime,
+              updatedAt: nowIso,
+            };
+          }
+          return a;
+        }),
+      };
+    });
+    updatePatients(updated);
+  };
+
+  const handleUpdateAppointmentChair = (
+    appointmentId: string,
+    chair: Appointment['chair']
+  ) => {
+    const updated = patients.map((p) => {
+      const appointments = p.appointments || [];
+      const aptExists = appointments.some((a) => a.id === appointmentId);
+      if (!aptExists) return p;
+      return {
+        ...p,
+        appointments: appointments.map((a) => (a.id === appointmentId ? { ...a, chair } : a)),
+      };
+    });
+    updatePatients(updated);
+  };
+
+  const handleRescheduleAppointment = (
+    appointmentId: string,
+    newTimeSlot: string,
+    newDate?: string
+  ) => {
+    const updated = patients.map((p) => {
+      const appointments = p.appointments || [];
+      const aptExists = appointments.some((a) => a.id === appointmentId);
+      if (!aptExists) return p;
+      return {
+        ...p,
+        appointments: appointments.map((a) =>
+          a.id === appointmentId
+            ? { ...a, timeSlot: newTimeSlot, date: newDate || a.date }
+            : a
+        ),
       };
     });
     updatePatients(updated);
@@ -343,11 +415,12 @@ export default function App() {
 
   const handleUpdateFollowUpStatus = (followUpId: string, status: FollowUpTask['status']) => {
     const updated = patients.map((p) => {
-      const flwExists = p.followUps.some((f) => f.id === followUpId);
+      const followUps = p.followUps || [];
+      const flwExists = followUps.some((f) => f.id === followUpId);
       if (!flwExists) return p;
       return {
         ...p,
-        followUps: p.followUps.map((f) => (f.id === followUpId ? { ...f, status } : f)),
+        followUps: followUps.map((f) => (f.id === followUpId ? { ...f, status } : f)),
       };
     });
     updatePatients(updated);
@@ -355,11 +428,12 @@ export default function App() {
 
   const handleRescheduleFollowUp = (followUpId: string, days: number = 3) => {
     const updated = patients.map((p) => {
-      const flwExists = p.followUps.some((f) => f.id === followUpId);
+      const followUps = p.followUps || [];
+      const flwExists = followUps.some((f) => f.id === followUpId);
       if (!flwExists) return p;
       return {
         ...p,
-        followUps: p.followUps.map((f) => {
+        followUps: followUps.map((f) => {
           if (f.id !== followUpId) return f;
           const curr = new Date(f.dueDate || Date.now());
           curr.setDate(curr.getDate() + days);
@@ -411,7 +485,7 @@ export default function App() {
     if (!targetPatient) return;
 
     // Generate unique invoice ID across all patients
-    const allInvoices = patients.flatMap((p) => p.invoices);
+    const allInvoices = patients.flatMap((p) => p.invoices || []);
     const maxNum = allInvoices.reduce((max, inv) => {
       const match = inv.id.match(/INV-2026-(\d+)/);
       if (match) {
@@ -432,7 +506,7 @@ export default function App() {
       if (p.id !== patientId) return p;
       return {
         ...p,
-        invoices: [newInvoice, ...p.invoices],
+        invoices: [newInvoice, ...(p.invoices || [])],
       };
     });
 
@@ -452,7 +526,7 @@ export default function App() {
     };
     const updated = patients.map((p) => {
       if (p.id !== patientId) return p;
-      const newFollowUps = [...p.followUps];
+      const newFollowUps = [...(p.followUps || [])];
       if (followUpAlert && followUpAlert.reason.trim()) {
         newFollowUps.unshift({
           id: `FLW-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
@@ -467,7 +541,7 @@ export default function App() {
       }
       return {
         ...p,
-        prescriptions: [newRx, ...p.prescriptions],
+        prescriptions: [newRx, ...(p.prescriptions || [])],
         followUps: newFollowUps,
       };
     });
@@ -479,7 +553,7 @@ export default function App() {
       if (p.id !== patientId) return p;
       return {
         ...p,
-        prescriptions: p.prescriptions.filter((rx) => rx.id !== rxId),
+        prescriptions: (p.prescriptions || []).filter((rx) => rx.id !== rxId),
       };
     });
     updatePatients(updated);
@@ -558,6 +632,8 @@ export default function App() {
                 setIsPrescriptionOpen(true);
               }}
               onUpdateAppointmentStatus={handleUpdateAppointmentStatus}
+              onUpdateAppointmentChair={handleUpdateAppointmentChair}
+              onRescheduleAppointment={handleRescheduleAppointment}
               onUpdateFollowUpStatus={handleUpdateFollowUpStatus}
               onRescheduleFollowUp={handleRescheduleFollowUp}
               onAddFollowUp={handleAddFollowUp}
@@ -607,13 +683,30 @@ export default function App() {
           {activeTab === 'appointments' && (
             <AppointmentsView
               patients={patients}
+              activeRole={activeRole}
               onSelectPatient={(id) => {
                 setSelectedPatientId(id);
                 setActiveTab('patients');
               }}
-              onOpenBookAppointment={() => setIsBookAppointmentOpen(true)}
+              onOpenBookAppointment={(date, pid) => {
+                setAppointmentDefaultDate(date);
+                setAppointmentDefaultPatientId(pid);
+                setIsBookAppointmentOpen(true);
+              }}
+              onOpenAddPatient={() => setIsAddPatientOpen(true)}
+              onOpenCreateInvoice={(pid) => {
+                setInvoiceDefaultPatientId(pid);
+                setIsCreateInvoiceOpen(true);
+              }}
+              onOpenPrescription={(pid) => {
+                setPrescriptionDefaultPatientId(pid);
+                setIsPrescriptionOpen(true);
+              }}
               onUpdateAppointmentStatus={handleUpdateAppointmentStatus}
+              onUpdateAppointmentChair={handleUpdateAppointmentChair}
+              onRescheduleAppointment={handleRescheduleAppointment}
               onUpdateFollowUpStatus={handleUpdateFollowUpStatus}
+              onAddAppointment={handleBookAppointment}
             />
           )}
 
@@ -668,8 +761,12 @@ export default function App() {
         existingPatients={patients}
         onSelectExistingPatient={(patientId) => {
           setSelectedPatientId(patientId);
-          setActiveTab('emr');
+          setActiveTab('patients');
           setIsAddPatientOpen(false);
+        }}
+        onPatientSaved={(newPatient) => {
+          setAppointmentDefaultPatientId(newPatient.id);
+          setIsBookAppointmentOpen(true);
         }}
       />
 
@@ -680,6 +777,10 @@ export default function App() {
         defaultDate={appointmentDefaultDate}
         defaultPatientId={appointmentDefaultPatientId}
         onBookAppointment={handleBookAppointment}
+        onOpenAddPatient={() => {
+          setIsBookAppointmentOpen(false);
+          setIsAddPatientOpen(true);
+        }}
       />
 
       <CreateInvoiceModal

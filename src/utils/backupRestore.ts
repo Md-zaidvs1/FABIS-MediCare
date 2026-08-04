@@ -24,6 +24,8 @@ import {
   saveDeletedPredefinedTreatments,
   getStoredDeletedPredefinedMedicines,
   saveDeletedPredefinedMedicines,
+  getStoredChairs,
+  saveStoredChairs,
 } from './storage';
 import { dualSaveSnapshot } from './indexedDBStorage';
 
@@ -39,6 +41,7 @@ export interface BackupData {
   deletedDiagnoses: string[];
   deletedTreatments: string[];
   deletedMedicines: string[];
+  chairs?: any[];
   clinicLogo: string | null;
   appIcon: string | null;
   theme: string;
@@ -132,6 +135,7 @@ export const exportEncryptedBackup = (patients?: Patient[], doctor?: DoctorProfi
     deletedDiagnoses: getStoredDeletedPredefinedDiagnoses(),
     deletedTreatments: getStoredDeletedPredefinedTreatments(),
     deletedMedicines: getStoredDeletedPredefinedMedicines(),
+    chairs: getStoredChairs(),
     clinicLogo: getStoredCustomClinicLogo(),
     appIcon: getStoredCustomAppIcon(),
     theme: getStoredTheme(),
@@ -217,6 +221,7 @@ export const restoreFromBackupData = async (backupData: BackupData): Promise<{ s
     if (Array.isArray(backupData.deletedDiagnoses)) saveDeletedPredefinedDiagnoses(backupData.deletedDiagnoses);
     if (Array.isArray(backupData.deletedTreatments)) saveDeletedPredefinedTreatments(backupData.deletedTreatments);
     if (Array.isArray(backupData.deletedMedicines)) saveDeletedPredefinedMedicines(backupData.deletedMedicines);
+    if (Array.isArray(backupData.chairs)) saveStoredChairs(backupData.chairs);
 
     if (backupData.clinicLogo !== undefined) saveCustomClinicLogo(backupData.clinicLogo);
     if (backupData.appIcon !== undefined) saveCustomAppIcon(backupData.appIcon);

@@ -6,6 +6,43 @@ import { Invoice, Prescription, DoctorProfile, Patient } from '../types';
 export { generatePdfBlobFromElement, sharePdfDocument, generateInvoiceJsPdf, generateInvoiceThermalJsPdf, generatePrescriptionJsPdf };
 
 /**
+ * Universal Direct Print Trigger using PDF Blob iframe
+ */
+export function printPdfBlob(blob: Blob): void {
+  const blobUrl = URL.createObjectURL(blob);
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  iframe.src = blobUrl;
+  document.body.appendChild(iframe);
+  iframe.onload = () => {
+    setTimeout(() => {
+      try {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+      } catch (e) {
+        console.warn('Direct iframe print blocked, opening in new window:', e);
+        const printWin = window.open(blobUrl, '_blank');
+        if (printWin) {
+          printWin.focus();
+          printWin.print();
+        }
+      } finally {
+        setTimeout(() => {
+          if (document.body.contains(iframe)) {
+            document.body.removeChild(iframe);
+          }
+        }, 2000);
+      }
+    }, 100);
+  };
+}
+
+/**
  * Standardized Invoice PDF Generator & Native Share Engine Caller
  */
 export async function shareInvoicePdf({

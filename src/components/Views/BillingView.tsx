@@ -1,9 +1,9 @@
 import React from 'react';
 import { Patient, Invoice, UserRole, DoctorProfile } from '../../types';
 import { formatCurrency, formatDate } from '../../utils/formatters';
-import { shareInvoicePdf } from '../../utils/pdfShare';
+import { shareInvoicePdf, printPdfBlob, generateInvoiceThermalJsPdf, generateInvoiceJsPdf } from '../../utils/pdfShare';
 import { getStoredCustomClinicLogo } from '../../utils/storage';
-import { Receipt, DollarSign, AlertCircle, Plus, ArrowUpRight, Lock, Printer } from 'lucide-react';
+import { Receipt, DollarSign, AlertCircle, Plus, ArrowUpRight, Lock, Printer, FileText, Share2 } from 'lucide-react';
 import { ProductionCollectionAnalytics } from '../Billing/ProductionCollectionAnalytics';
 
 interface BillingViewProps {
@@ -23,10 +23,43 @@ export const BillingView: React.FC<BillingViewProps> = ({
   onOpenCreateInvoice,
   onViewInvoiceModal,
 }) => {
-  const allInvoices = patients.flatMap((p) => p.invoices);
+  const allInvoices = patients.flatMap((p) => p.invoices || []);
 
   const totalRevenue = allInvoices.reduce((sum, inv) => sum + inv.paidAmount, 0);
   const totalPending = allInvoices.reduce((sum, inv) => sum + inv.balanceDue, 0);
+
+  const getDefaultDoctor = (): DoctorProfile => doctor || {
+    name: 'Dr. Dental Specialist',
+    qualifications: 'BDS, MDS',
+    regNumber: 'DENT-12345',
+    clinicName: 'Dental Care Clinic',
+    clinicAddress: 'Main Healthcare Avenue',
+    clinicPhone: '+91 98765 43210',
+    clinicEmail: 'contact@dentalclinic.com',
+  };
+
+  const handlePrintThermalDirect = (inv: Invoice) => {
+    const patient = patients.find((p) => p.id === inv.patientId);
+    const pdfBlob = generateInvoiceThermalJsPdf(inv, getDefaultDoctor(), patient, getStoredCustomClinicLogo());
+    if (pdfBlob) printPdfBlob(pdfBlob);
+  };
+
+  const handlePrintA4Direct = (inv: Invoice) => {
+    const patient = patients.find((p) => p.id === inv.patientId);
+    const pdfBlob = generateInvoiceJsPdf(inv, getDefaultDoctor(), patient, getStoredCustomClinicLogo());
+    if (pdfBlob) printPdfBlob(pdfBlob);
+  };
+
+  const handleShareThermalWhatsApp = (inv: Invoice) => {
+    const patient = patients.find((p) => p.id === inv.patientId);
+    shareInvoicePdf({
+      invoice: inv,
+      doctor: getDefaultDoctor(),
+      patient,
+      customLogo: getStoredCustomClinicLogo(),
+      format: 'thermal',
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -78,43 +111,44 @@ export const BillingView: React.FC<BillingViewProps> = ({
       )}
 
       <div className="bg-white rounded-[28px] border border-[#E8ECF3] shadow-[0_10px_30px_rgba(0,0,0,0.03)] overflow-hidden text-[#1E293B]">
-        <div className="p-5 border-b border-[#E8ECF3] font-bold text-[#1E293B] text-base">
-          Patient Invoices Ledger
+        <div className="p-5 border-b border-[#E8ECF3] font-bold text-[#1E293B] text-base flex items-center justify-between">
+          <span>Patient Invoices Ledger</span>
+          <span className="text-xs text-[#64748B] font-normal">Supports 80mm Thermal POS Receipts & A4 Printing</span>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-sm">
+          <table className="w-full text-left border-collapse text-xs sm:text-sm">
             <thead>
-              <tr className="bg-[#F8FAFC] text-[#94A3B8] font-bold text-xs uppercase tracking-wider border-b border-[#E8ECF3]">
-                <th className="p-4">Invoice #</th>
-                <th className="p-4">Date</th>
-                <th className="p-4">Patient</th>
-                <th className="p-4">Total</th>
-                <th className="p-4">Paid</th>
-                <th className="p-4">Balance Due</th>
-                <th className="p-4">Status</th>
-                <th className="p-4 text-right">Receipt</th>
+              <tr className="bg-[#F8FAFC] text-[#64748B] font-bold text-xs uppercase tracking-wider border-b border-[#E8ECF3]">
+                <th className="p-3.5 whitespace-nowrap min-w-[110px]">Invoice #</th>
+                <th className="p-3.5 whitespace-nowrap min-w-[100px]">Date</th>
+                <th className="p-3.5 whitespace-nowrap min-w-[160px]">Patient</th>
+                <th className="p-3.5 text-right whitespace-nowrap min-w-[100px]">Total</th>
+                <th className="p-3.5 text-right whitespace-nowrap min-w-[100px]">Paid</th>
+                <th className="p-3.5 text-right whitespace-nowrap min-w-[110px]">Balance Due</th>
+                <th className="p-3.5 text-center whitespace-nowrap min-w-[90px]">Status</th>
+                <th className="p-3.5 text-right whitespace-nowrap min-w-[320px]">Print & Share Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E8ECF3] text-[#1E293B]">
               {allInvoices.map((inv, idx) => (
                 <tr key={`${inv.id}-${inv.patientId}-${idx}`} className="hover:bg-[#F8FAFC]/80 transition-colors">
-                  <td className="p-4 font-mono font-bold text-[#3BA7F5]">{inv.id}</td>
-                  <td className="p-4 text-[#64748B] font-medium">{formatDate(inv.date)}</td>
-                  <td className="p-4 font-bold text-[#1E293B]">
+                  <td className="p-3.5 font-mono font-bold text-[#3BA7F5] whitespace-nowrap">{inv.id}</td>
+                  <td className="p-3.5 text-[#64748B] font-medium whitespace-nowrap">{formatDate(inv.date)}</td>
+                  <td className="p-3.5 font-bold text-[#1E293B] whitespace-nowrap">
                     <button
                       onClick={() => onSelectPatient(inv.patientId)}
                       className="hover:text-[#3BA7F5] flex items-center gap-1 cursor-pointer transition-colors"
                     >
-                      {inv.patientName} <ArrowUpRight className="w-4 h-4 text-[#94A3B8]" />
+                      {inv.patientName} <ArrowUpRight className="w-3.5 h-3.5 text-[#94A3B8]" />
                     </button>
                   </td>
-                  <td className="p-4 font-mono font-bold text-[#1E293B]">{formatCurrency(inv.netTotal)}</td>
-                  <td className="p-4 font-mono text-[#10B981] font-bold">{formatCurrency(inv.paidAmount)}</td>
-                  <td className="p-4 font-mono text-rose-600 font-bold">{formatCurrency(inv.balanceDue)}</td>
-                  <td className="p-4">
+                  <td className="p-3.5 font-mono font-bold text-[#1E293B] text-right whitespace-nowrap">{formatCurrency(inv.netTotal)}</td>
+                  <td className="p-3.5 font-mono text-[#10B981] font-bold text-right whitespace-nowrap">{formatCurrency(inv.paidAmount)}</td>
+                  <td className="p-3.5 font-mono text-rose-600 font-bold text-right whitespace-nowrap">{formatCurrency(inv.balanceDue)}</td>
+                  <td className="p-3.5 text-center whitespace-nowrap">
                     <span
                       className={`px-3 py-1 rounded-full text-xs font-bold border ${
-                        inv.status === 'Paid'
+                        inv.status === 'Paid' || inv.status === 'PAID'
                           ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                           : 'bg-amber-50 text-amber-800 border-amber-200'
                       }`}
@@ -122,47 +156,49 @@ export const BillingView: React.FC<BillingViewProps> = ({
                       {inv.status}
                     </span>
                   </td>
-                  <td className="p-4 text-right">
-                    <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                  <td className="p-3.5 text-right whitespace-nowrap">
+                    <div className="flex items-center justify-end gap-1.5">
+                      {/* Direct 80mm Thermal Receipt Print Button */}
                       <button
-                        onClick={() => onViewInvoiceModal(inv)}
-                        className="px-2.5 py-1.5 min-h-[36px] rounded-xl bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1 shadow-xs"
-                        title="Print Invoice"
+                        type="button"
+                        onClick={() => handlePrintThermalDirect(inv)}
+                        className="px-2.5 py-1.5 min-h-[36px] rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-black shadow-xs transition-all cursor-pointer inline-flex items-center gap-1"
+                        title="Direct 80mm Thermal Receipt Print"
                       >
-                        <Printer className="w-3.5 h-3.5 text-[#3BA7F5]" />
-                        <span className="hidden xl:inline">Print</span>
+                        <Printer className="w-3.5 h-3.5 text-white" />
+                        <span>80mm Thermal</span>
                       </button>
+
+                      {/* Direct A4 Invoice Print Button */}
                       <button
-                        onClick={() => {
-                          const patient = patients.find((p) => p.id === inv.patientId);
-                          const defaultDoctor: DoctorProfile = doctor || {
-                            name: 'Dr. Dental Specialist',
-                            qualifications: 'BDS, MDS',
-                            regNumber: 'DENT-12345',
-                            clinicName: 'Dental Care Clinic',
-                            clinicAddress: 'Main Healthcare Avenue',
-                            clinicPhone: '+91 98765 43210',
-                            clinicEmail: 'contact@dentalclinic.com',
-                          };
-                          shareInvoicePdf({
-                            invoice: inv,
-                            doctor: defaultDoctor,
-                            patient,
-                            customLogo: getStoredCustomClinicLogo(),
-                          });
-                        }}
+                        type="button"
+                        onClick={() => handlePrintA4Direct(inv)}
+                        className="px-2.5 py-1.5 min-h-[36px] rounded-xl bg-[#0F172A] hover:bg-[#1E293B] text-white text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1 shadow-xs"
+                        title="Print Standard A4 Invoice"
+                      >
+                        <FileText className="w-3.5 h-3.5 text-[#3BA7F5]" />
+                        <span>A4 Print</span>
+                      </button>
+
+                      {/* WhatsApp Share 80mm Receipt */}
+                      <button
+                        type="button"
+                        onClick={() => handleShareThermalWhatsApp(inv)}
                         className="px-2.5 py-1.5 min-h-[36px] rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold border border-emerald-200 transition-all cursor-pointer inline-flex items-center gap-1"
-                        title="Share invoice PDF via WhatsApp"
+                        title="Share 80mm Thermal receipt via WhatsApp"
                       >
                         <span className="text-xs">💬</span>
-                        <span className="hidden xl:inline">WhatsApp</span>
+                        <span>WhatsApp</span>
                       </button>
+
+                      {/* View Modal Button */}
                       <button
+                        type="button"
                         onClick={() => onViewInvoiceModal(inv)}
                         className="px-2.5 py-1.5 min-h-[36px] rounded-xl bg-[#F1F5F9] hover:bg-[#E2E8F0] text-[#1E293B] text-xs font-bold border border-[#E8ECF3] transition-all cursor-pointer inline-flex items-center gap-1"
-                        title="View Receipt"
+                        title="Open View / Format Selector Modal"
                       >
-                        <Receipt className="w-3.5 h-3.5 text-amber-600" />
+                        <Receipt className="w-3.5 h-3.5 text-[#3BA7F5]" />
                         <span>View</span>
                       </button>
                     </div>
@@ -176,3 +212,4 @@ export const BillingView: React.FC<BillingViewProps> = ({
     </div>
   );
 };
+

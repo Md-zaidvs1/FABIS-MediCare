@@ -4,21 +4,34 @@ import { formatDate } from '../../utils/formatters';
 import { CalendarDays, Plus, Clock, CheckSquare, PhoneCall, ArrowUpRight, Bell, Users } from 'lucide-react';
 import { WaitingListDrawer } from '../Appointments/WaitingListDrawer';
 import { RecallTrackerModal } from '../Appointments/RecallTrackerModal';
+import { AppointmentSchedulerSection } from '../Dashboard/AppointmentSchedulerSection';
 
 interface AppointmentsViewProps {
   patients: Patient[];
+  activeRole?: string;
   onSelectPatient: (patientId: string) => void;
-  onOpenBookAppointment: () => void;
+  onOpenBookAppointment: (date?: string, patientId?: string) => void;
+  onOpenAddPatient?: () => void;
+  onOpenCreateInvoice?: (patientId: string) => void;
+  onOpenPrescription?: (patientId: string) => void;
   onUpdateAppointmentStatus: (appointmentId: string, status: Appointment['status']) => void;
+  onUpdateAppointmentChair?: (appointmentId: string, chair: Appointment['chair']) => void;
+  onRescheduleAppointment?: (appointmentId: string, timeSlot: string, date: string) => void;
   onUpdateFollowUpStatus: (followUpId: string, status: FollowUpTask['status']) => void;
   onAddAppointment?: (appointment: Omit<Appointment, 'id'>) => void;
 }
 
 export const AppointmentsView: React.FC<AppointmentsViewProps> = ({
   patients,
+  activeRole = 'Doctor',
   onSelectPatient,
   onOpenBookAppointment,
+  onOpenAddPatient,
+  onOpenCreateInvoice,
+  onOpenPrescription,
   onUpdateAppointmentStatus,
+  onUpdateAppointmentChair,
+  onRescheduleAppointment,
   onUpdateFollowUpStatus,
   onAddAppointment,
 }) => {
@@ -167,45 +180,18 @@ export const AppointmentsView: React.FC<AppointmentsViewProps> = ({
       </div>
 
       {tab === 'appointments' ? (
-        <div className="space-y-3">
-          {allAppointments.map((apt) => (
-            <div
-              key={apt.id}
-              className="bg-white p-5 rounded-[24px] border border-[#E8ECF3] shadow-[0_10px_30px_rgba(0,0,0,0.03)] flex flex-col md:flex-row items-start md:items-center justify-between gap-3 hover:border-[#3BA7F5]/40 transition-all text-xs"
-            >
-              <div className="space-y-1">
-                <div className="flex items-center gap-2.5">
-                  <span className="font-mono font-bold text-[#1E88A8] bg-[#EBF7FC] px-3 py-1 rounded-xl border border-[#3BA7F5]/30">
-                    {formatDate(apt.date)} @ {apt.timeSlot}
-                  </span>
-                  <button
-                    onClick={() => onSelectPatient(apt.patientId)}
-                    className="font-bold text-[17px] text-[#1E293B] hover:text-[#3BA7F5] flex items-center gap-1 cursor-pointer"
-                  >
-                    {apt.patientName} <ArrowUpRight className="w-4 h-4 text-[#94A3B8]" />
-                  </button>
-                </div>
-                <div className="text-[#64748B] font-semibold text-sm">
-                  {apt.procedure} • <span className="text-[#94A3B8]">{apt.chair}</span>
-                </div>
-                {apt.notes && <p className="text-xs text-[#64748B] italic">"{apt.notes}"</p>}
-              </div>
-
-              <select
-                value={apt.status}
-                onChange={(e) => onUpdateAppointmentStatus(apt.id, e.target.value as any)}
-                className="px-4 py-2 rounded-xl bg-[#F8FAFC] border border-[#E8ECF3] text-xs font-bold text-[#1E293B] outline-none cursor-pointer"
-              >
-                <option value="Scheduled">Scheduled</option>
-                <option value="Arrived">Arrived</option>
-                <option value="In Consultation">In Consultation</option>
-                <option value="In-Chair">In-Chair / Operatory</option>
-                <option value="Completed">Completed</option>
-                <option value="Cancelled">Cancelled</option>
-              </select>
-            </div>
-          ))}
-        </div>
+        <AppointmentSchedulerSection
+          patients={patients}
+          activeRole={activeRole}
+          onSelectPatient={onSelectPatient}
+          onOpenBookAppointment={onOpenBookAppointment}
+          onOpenAddPatient={onOpenAddPatient}
+          onOpenCreateInvoice={onOpenCreateInvoice}
+          onOpenPrescription={onOpenPrescription}
+          onUpdateAppointmentStatus={onUpdateAppointmentStatus}
+          onUpdateAppointmentChair={onUpdateAppointmentChair}
+          onRescheduleAppointment={onRescheduleAppointment}
+        />
       ) : (
         <div className="space-y-3">
           {allFollowUps.map((flw) => (

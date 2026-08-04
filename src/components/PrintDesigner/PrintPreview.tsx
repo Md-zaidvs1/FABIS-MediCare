@@ -31,6 +31,93 @@ const SAMPLE_INVOICE_ITEMS = [
 export const PrintPreview: React.FC<PrintPreviewProps> = ({ config, doctor, patient }) => {
   const activePatient = patient || SAMPLE_PATIENT;
 
+  // Render PNG template with overlaid elements if backgroundImageUrl exists
+  if (config.backgroundImageUrl && config.elements && config.elements.length > 0) {
+    const isThermal = config.type === 'receipt_80mm';
+    return (
+      <div className="w-full flex justify-center bg-slate-200/60 p-4 sm:p-6 rounded-2xl overflow-x-auto min-h-[620px]">
+        <div
+          className={`bg-white shadow-2xl relative select-none overflow-hidden transition-all border border-slate-300 ${
+            isThermal ? 'w-[320px] min-h-[600px]' : 'w-[540px] h-[760px]'
+          }`}
+          style={{
+            backgroundImage: `url(${config.backgroundImageUrl})`,
+            backgroundSize: '100% 100%',
+            backgroundRepeat: 'no-repeat',
+          }}
+        >
+          {config.watermarkImageUrl && (
+            <div
+              className="absolute inset-0 pointer-events-none opacity-15 bg-center bg-no-repeat bg-contain"
+              style={{ backgroundImage: `url(${config.watermarkImageUrl})` }}
+            />
+          )}
+
+          {config.elements.map((el) => {
+            if (el.hidden) return null;
+            let text = el.content;
+            if (el.fieldKey === 'patient_name') text = (el.labelOverride ? `${el.labelOverride}: ` : '') + activePatient.name;
+            else if (el.fieldKey === 'mrn') text = (el.labelOverride ? `${el.labelOverride}: ` : '') + activePatient.id;
+            else if (el.fieldKey === 'appointment_date') text = (el.labelOverride ? `${el.labelOverride}: ` : '') + '02 Aug 2026';
+            else if (el.fieldKey === 'invoice_number') text = (el.labelOverride ? `${el.labelOverride}: ` : '') + 'INV-2026-089';
+            else if (el.fieldKey === 'grand_total') text = (el.labelOverride ? `${el.labelOverride}: ` : '') + '₹5,500.00';
+            else if (el.fieldKey === 'payment_method') text = (el.labelOverride ? `${el.labelOverride}: ` : '') + 'CARD / UPI';
+            else if (el.fieldKey === 'clinic_name') text = config.clinicNameOverride || doctor.clinicName || 'RK DENTAL CLINIC';
+            else if (el.fieldKey === 'clinic_address') text = config.clinicAddressOverride || doctor.clinicAddress || 'Kalavai 632506';
+            else if (el.fieldKey === 'clinic_phone') text = `Ph: ${config.clinicPhoneOverride || doctor.clinicPhone || '+91 8883261285'}`;
+            else if (el.fieldKey === 'doctor_name') text = `Dr. ${doctor.name}`;
+            else if (el.fieldKey === 'doctor_reg_no') text = `Reg: ${doctor.regNumber || 'DENT-12345'}`;
+            else if (el.fieldKey === 'thank_you_message') text = config.thankYouMessage || 'THANK YOU FOR YOUR VISIT!';
+
+            return (
+              <div
+                key={el.id}
+                className="absolute px-1 py-0.5"
+                style={{
+                  left: `${el.x}%`,
+                  top: `${el.y}%`,
+                  width: el.width ? `${el.width}%` : 'auto',
+                  fontSize: el.fontSize ? `${el.fontSize}px` : '12px',
+                  fontFamily: el.fontFamily || 'sans-serif',
+                  fontWeight: el.bold ? 'bold' : 'normal',
+                  fontStyle: el.italic ? 'italic' : 'normal',
+                  textDecoration: el.underline ? 'underline' : 'none',
+                  color: el.color || '#000000',
+                  textAlign: el.textAlign || 'left',
+                }}
+              >
+                {el.type === 'table' ? (
+                  <div className="border border-slate-300 bg-white/80 p-1 text-[10px]">
+                    <div className="font-bold flex justify-between border-b pb-0.5 mb-0.5">
+                      <span>PROCEDURE</span>
+                      <span>AMOUNT</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Dental Consultation</span>
+                      <span>₹200.00</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Root Canal Treatment</span>
+                      <span>₹4,500.00</span>
+                    </div>
+                  </div>
+                ) : el.type === 'barcode' ? (
+                  <div className="bg-white/90 p-1 border border-slate-300 text-center text-[9px] font-mono font-bold">
+                    ||||||||||||||||||||||||||||||||
+                    <br />
+                    RK-20260717-0001
+                  </div>
+                ) : (
+                  text || el.labelOverride || el.id
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   const fontClass =
     config.fontSize === 'small' ? 'text-[11px]' : config.fontSize === 'large' ? 'text-[14px]' : 'text-[12px]';
 
@@ -286,91 +373,188 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({ config, doctor, pati
   // 2. 80MM THERMAL RECEIPT PREVIEW
   // ----------------------------------------------------
   if (config.type === 'receipt_80mm') {
+    const thermalItems = [
+      { description: 'Dental Consultation', total: 200 },
+      { description: 'Surgical / Impacted Extraction', total: 2500 },
+      { description: 'Single Tooth Extraction', total: 500 },
+    ];
+    const thermalGrandTotal = 3200;
+    const invId = config.barcodeText || 'RK-20260717-0001';
+
+    const getDividerClass = () => {
+      if (config.dividerStyle === 'solid') return 'border-b border-black my-2';
+      if (config.dividerStyle === 'dashed') return 'border-b border-dashed border-black my-2';
+      if (config.dividerStyle === 'double') return 'border-b-2 border-double border-black my-2';
+      return 'border-b border-dotted border-black my-2';
+    };
+
     return (
       <div className="w-full flex justify-center bg-slate-200/60 p-4 sm:p-6 rounded-2xl min-h-[550px]">
-        {/* Simulated Thermal Tape */}
+        {/* Simulated Thermal Paper Roll with Sawtooth Edges */}
         <div
-          className={`bg-white shadow-xl text-black border border-slate-300 w-[300px] font-mono p-4 space-y-3 rounded-t-sm transition-all duration-200 ${fontClass} ${weightClass}`}
+          className={`bg-white shadow-2xl text-black border border-slate-300 w-[310px] font-mono p-4 space-y-1.5 rounded-t-sm transition-all duration-200 relative ${fontClass} ${weightClass}`}
           style={{
-            borderBottom: '4px dashed #CBD5E1',
+            fontFamily: config.fontFamily || 'Courier Prime, monospace',
+            paddingLeft: `${Math.max(4, config.marginMm * 2)}px`,
+            paddingRight: `${Math.max(4, config.marginMm * 2)}px`,
+            borderBottom: '6px dotted #94A3B8',
           }}
         >
-          {/* Header */}
-          <div className="text-center space-y-1 pb-2 border-b border-dashed border-slate-400">
+          {/* Watermark Image Layer */}
+          {config.watermarkImageUrl && (
+            <div
+              className="absolute inset-0 pointer-events-none opacity-10 bg-center bg-no-repeat bg-contain m-4"
+              style={{ backgroundImage: `url(${config.watermarkImageUrl})` }}
+            />
+          )}
+
+          {/* Logo Header */}
+          {config.showLogo && config.logoUrl && (
+            <div className="flex justify-center pb-1">
+              <img src={config.logoUrl} alt="Clinic Logo" className="h-10 object-contain" />
+            </div>
+          )}
+
+          {/* Clinic Information (Centered) */}
+          <div className="text-center space-y-0.5">
             {config.showClinicName && (
-              <h2 className="font-black text-sm uppercase tracking-wide">
-                {config.clinicNameOverride || doctor.clinicName || 'FABIS DENTAL CARE'}
+              <h2 className="font-black text-sm sm:text-base uppercase tracking-tight text-black">
+                {config.clinicNameOverride || doctor.clinicName || 'RK DENTAL CLINIC'}
               </h2>
             )}
             {config.showClinicAddress && (
-              <p className="text-[10px] font-normal leading-tight">
-                {config.clinicAddressOverride || doctor.clinicAddress || '123 Health Ave, Medical Zone'}
+              <p className="text-[10px] font-normal leading-snug px-2 text-black">
+                {config.clinicAddressOverride || doctor.clinicAddress || 'No.10/1 School street, near police station, Kalavai 632506'}
               </p>
             )}
             {config.showClinicPhone && (
-              <p className="text-[10px] font-normal">
-                Ph: {config.clinicPhoneOverride || doctor.clinicPhone || '+91 98765 43210'}
+              <p className="text-[10px] font-normal text-black">
+                Ph: {config.clinicPhoneOverride || doctor.clinicPhone || '+91 8883261285'}
               </p>
+            )}
+            {config.showClinicEmail && config.clinicEmailOverride && (
+              <p className="text-[10px] font-normal text-black">Email: {config.clinicEmailOverride}</p>
+            )}
+            {config.showClinicWebsite && config.clinicWebsiteOverride && (
+              <p className="text-[10px] font-normal text-black">{config.clinicWebsiteOverride}</p>
             )}
           </div>
 
-          {/* Receipt Info */}
-          <div className="text-[11px] space-y-1 pb-2 border-b border-dashed border-slate-400">
-            <div className="flex justify-between">
-              <span>Date: {new Date().toLocaleDateString('en-IN')}</span>
-              <span className="font-bold">#INV-8092</span>
-            </div>
-            <div className="flex justify-between font-bold">
-              <span>Pt: {activePatient.name}</span>
-              <span>MRN: {activePatient.id}</span>
-            </div>
+          {/* Divider 1 */}
+          <div className={getDividerClass()} />
+
+          {/* Date & Invoice Meta Row 1 */}
+          <div className="text-[11px] flex justify-between items-center font-normal">
+            <span>Date: 2026-07-17 13:55</span>
+            <span className="font-extrabold">{invId}</span>
           </div>
 
-          {/* Line Items */}
-          <div className="space-y-1.5 text-[11px]">
-            <div className="flex justify-between font-bold border-b border-slate-300 pb-1">
-              <span>PROCEDURE</span>
-              <span>AMOUNT</span>
-            </div>
-            {SAMPLE_INVOICE_ITEMS.map((item, idx) => (
+          {/* Patient & Phone Meta Row 2 */}
+          <div className="text-[11px] flex justify-between items-center font-normal">
+            <span>Patient: {activePatient.name === 'Ananya Sharma' ? 'ZAID' : activePatient.name}</span>
+            <span>Ph: {activePatient.mobile === '+91 98765 43210' ? '7418773765' : activePatient.mobile}</span>
+          </div>
+
+          {/* Divider 2 */}
+          <div className={getDividerClass()} />
+
+          {/* Procedure Table Header */}
+          <div className="text-[11px] font-black flex justify-between items-center uppercase tracking-wider">
+            <span>PROCEDURE</span>
+            <span>AMOUNT</span>
+          </div>
+
+          {/* Divider 3 */}
+          <div className={getDividerClass()} />
+
+          {/* Procedure Line Items */}
+          <div className="space-y-1 text-[11px]">
+            {thermalItems.map((item, idx) => (
               <div key={idx} className="flex justify-between items-start gap-2">
-                <span className="font-normal truncate">{item.description}</span>
-                <span className="font-bold shrink-0">₹{item.total}</span>
+                <span className="font-normal leading-tight max-w-[190px]">{item.description}</span>
+                <span className="font-extrabold shrink-0 text-right">
+                  {item.total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
               </div>
             ))}
           </div>
 
-          {/* Totals */}
-          <div className="pt-2 border-t border-dashed border-slate-400 space-y-1">
-            <div className="flex justify-between text-xs font-black text-base">
-              <span>GRAND TOTAL</span>
-              <span>₹5,500.00</span>
-            </div>
-            <div className="flex justify-between text-[11px] font-bold">
-              <span>Payment Mode:</span>
-              <span className="border border-black px-1.5 rounded">UPI CASH</span>
-            </div>
+          {/* Divider 4 */}
+          <div className={getDividerClass()} />
+
+          {/* Grand Total */}
+          <div className="text-xs sm:text-sm font-black flex justify-between items-center uppercase tracking-tight py-0.5">
+            <span>GRAND TOTAL</span>
+            <span className="text-sm font-black">
+              ₹ {thermalGrandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </span>
           </div>
 
-          {/* QR Code */}
-          {config.showQrCode && (
-            <div className="text-center pt-2 flex flex-col items-center">
-              <div className="w-16 h-16 border border-black p-1 bg-white">
-                <QrCode className="w-full h-full text-black" />
+          {/* Divider 5 */}
+          <div className={getDividerClass()} />
+
+          {/* Payment Mode */}
+          {config.showPaymentMode !== false && (
+            <>
+              <div className="text-[11px] flex justify-between items-center font-normal py-0.5">
+                <span>Payment Mode</span>
+                <span className="border-2 border-black px-2 py-0.5 font-black text-[11px] uppercase rounded-none tracking-wider">
+                  {config.paymentModeOverride || 'CARD'}
+                </span>
               </div>
-              <p className="text-[9px] font-bold mt-1">{config.qrCodeLabel || 'Scan to Pay via UPI'}</p>
+              {/* Divider 6 */}
+              <div className={getDividerClass()} />
+            </>
+          )}
+
+          {/* Footer Thank You & Sub-note */}
+          <div className="text-center pt-1 space-y-0.5">
+            {config.showThankYou && (
+              <h3 className="font-black text-xs sm:text-sm uppercase tracking-tight text-black">
+                {config.thankYouMessage || 'THANK YOU FOR YOUR VISIT!'}
+              </h3>
+            )}
+            {config.showFooter && (
+              <p className="text-[10px] font-normal text-black">{config.footerText || 'Keep smiling.'}</p>
+            )}
+          </div>
+
+          {/* Stamp & Signature if present */}
+          {(config.stampImageUrl || config.signatureImageUrl) && (
+            <div className="flex justify-around items-center pt-2">
+              {config.stampImageUrl && (
+                <img src={config.stampImageUrl} alt="Stamp" className="h-8 object-contain" />
+              )}
+              {config.signatureImageUrl && (
+                <div className="text-center">
+                  <img src={config.signatureImageUrl} alt="Signature" className="h-6 object-contain mx-auto" />
+                  <span className="text-[8px] block font-bold">Authorized Sign</span>
+                </div>
+              )}
             </div>
           )}
 
-          {/* Footer */}
-          <div className="text-center pt-2 border-t border-dashed border-slate-400 space-y-0.5">
-            {config.showThankYou && (
-              <p className="font-bold text-[11px]">{config.thankYouMessage || 'THANK YOU FOR YOUR VISIT!'}</p>
-            )}
-            {config.showFooter && (
-              <p className="text-[9px] font-normal text-slate-700">{config.footerText || 'Keep smiling. Valid Cash Receipt.'}</p>
-            )}
-          </div>
+          {/* UPI QR Code if enabled */}
+          {config.showQrCode && (
+            <div className="text-center pt-2 flex flex-col items-center">
+              <div className="w-16 h-16 border-2 border-black p-1 bg-white">
+                <QrCode className="w-full h-full text-black" />
+              </div>
+              <p className="text-[9px] font-extrabold mt-0.5 uppercase">{config.qrCodeLabel || 'Scan UPI'}</p>
+            </div>
+          )}
+
+          {/* Barcode graphic at bottom */}
+          {(config.showBarcode ?? true) && (
+            <div className="text-center pt-3 pb-1 flex flex-col items-center justify-center">
+              <div className="flex items-end justify-center h-9 gap-[2px] overflow-hidden py-1">
+                {[4, 2, 1, 3, 1, 4, 2, 1, 3, 2, 4, 1, 2, 3, 1, 4, 1, 2, 4, 2, 1, 3, 1, 4, 2, 3, 1, 2].map((w, i) => (
+                  <div key={i} className="bg-black h-full" style={{ width: `${w}px` }} />
+                ))}
+              </div>
+              <span className="text-[10px] font-mono font-black tracking-widest text-black mt-0.5">{invId}</span>
+            </div>
+          )}
         </div>
       </div>
     );

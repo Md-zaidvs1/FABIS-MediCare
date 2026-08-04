@@ -151,7 +151,7 @@ export interface Invoice {
 }
 
 export interface ChairStatus {
-  id: 'Chair 1 (Main Operatory)' | 'Chair 2 (Minor Procedures)' | 'Chair 3 (Surgical Suite)';
+  id: string;
   name: string;
   status: 'Available' | 'Occupied' | 'Sanitizing' | 'Reserved';
   currentPatientId?: string;
@@ -171,8 +171,14 @@ export interface Appointment {
   timeSlot: string; // e.g. "10:30 AM"
   durationMinutes: number;
   procedure: string;
-  chair: 'Chair 1 (Main Operatory)' | 'Chair 2 (Minor Procedures)' | 'Chair 3 (Surgical Suite)';
+  chair: string;
   status: 'Scheduled' | 'Arrived' | 'In Consultation' | 'In-Chair' | 'Completed' | 'Cancelled' | 'No-Show' | 'Waiting-List';
+  createdAt?: string; // ISO string creation timestamp
+  checkInTime?: string; // ISO or time string when patient checked in
+  treatmentStartTime?: string; // ISO or time string when treatment was started
+  treatmentEndTime?: string; // ISO or time string when treatment finished
+  completedTime?: string; // ISO string when appointment completed
+  updatedAt?: string; // ISO string last updated timestamp
   notes?: string;
   isFollowUp?: boolean;
   recallDueDate?: string;
@@ -197,7 +203,8 @@ export interface ClinicalMedia {
   title: string;
   category: 'OPG' | 'IOPA X-Ray' | 'Intraoral Photo' | 'CT Scan' | 'Lab Report';
   date: string;
-  url: string; // placeholder image or base64
+  url: string; // placeholder image or base64 or cloud storage URL
+  filePath?: string; // Supabase multi-tenant storage path
   tags: string[];
   notes?: string;
 }
@@ -274,6 +281,7 @@ export type ThemePalette =
 
 export interface DoctorProfile {
   id: string;
+  clinicId?: string; // Tenant ID for multi-tenant isolation
   name: string;
   qualifications: string;
   title: string;
@@ -285,4 +293,32 @@ export interface DoctorProfile {
   website?: string;
   gstin?: string;
   currencySymbol: string;
+  logoUrl?: string;
+}
+
+export type WelcomeCardIconType = 
+  | 'Sparkles' 
+  | 'Stethoscope' 
+  | 'Sun' 
+  | 'Shield' 
+  | 'Heart' 
+  | 'Crown' 
+  | 'Award' 
+  | 'Activity' 
+  | 'Smile';
+
+export interface DashboardPersonalizationSettings {
+  welcomeTitle: string;
+  welcomeMessage: string;
+  motivationalQuote: string;
+  clinicNameOverride?: string;
+  showActiveChairs: boolean;
+  showTodayAppointments: boolean;
+  showWaitingPatients: boolean;
+  showTodayRevenue: boolean;
+  backgroundType: 'gradient' | 'solid' | 'image';
+  backgroundColor: string;
+  backgroundGradient: string;
+  backgroundImageUrl?: string;
+  cardIcon: WelcomeCardIconType;
 }

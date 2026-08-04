@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ChairStatus, Patient } from '../../types';
-import { INITIAL_CHAIR_STATUSES } from '../../data/initialData';
+import { getStoredChairs, saveStoredChairs } from '../../utils/storage';
 import { formatTodayISO } from '../../utils/formatters';
 import { Activity, Clock, RefreshCw, User, UserCheck, AlertCircle, Sparkles } from 'lucide-react';
 
@@ -13,13 +13,21 @@ export const ChairManagementGrid: React.FC<ChairManagementGridProps> = ({
   patients,
   onSelectPatient,
 }) => {
-  const [chairs, setChairs] = useState<ChairStatus[]>(INITIAL_CHAIR_STATUSES);
+  const [chairs, setChairs] = useState<ChairStatus[]>(getStoredChairs());
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      setChairs(getStoredChairs());
+    };
+    window.addEventListener('fabis_chairs_updated', handleUpdate);
+    return () => window.removeEventListener('fabis_chairs_updated', handleUpdate);
+  }, []);
 
   useEffect(() => {
     const todayStr = formatTodayISO();
     const activeInChairApts: { chair: string; patientId: string; patientName: string; procedure: string; timeSlot: string }[] = [];
     patients.forEach((p) => {
-      p.appointments.forEach((apt) => {
+      (p.appointments || []).forEach((apt) => {
         if (apt.date === todayStr && apt.status === 'In-Chair') {
           activeInChairApts.push({
             chair: apt.chair,
@@ -33,15 +41,15 @@ export const ChairManagementGrid: React.FC<ChairManagementGridProps> = ({
     });
 
     if (activeInChairApts.length > 0) {
-      setChairs((prev) =>
-        prev.map((c) => {
+      setChairs((prev) => {
+        const next = prev.map((c) => {
           const matchingApt = activeInChairApts.find(
             (a) => a.chair === c.id || c.id.startsWith(a.chair) || c.name.includes(a.chair.split(' ')[0])
           );
           if (matchingApt) {
             return {
               ...c,
-              status: 'Occupied',
+              status: 'Occupied' as const,
               currentPatientId: matchingApt.patientId,
               currentPatientName: matchingApt.patientName,
               currentProcedure: matchingApt.procedure,
@@ -49,14 +57,15 @@ export const ChairManagementGrid: React.FC<ChairManagementGridProps> = ({
             };
           }
           return c;
-        })
-      );
+        });
+        return next;
+      });
     }
   }, [patients]);
 
   const handleUpdateStatus = (chairId: string, newStatus: ChairStatus['status']) => {
-    setChairs((prev) =>
-      prev.map((c) => {
+    setChairs((prev) => {
+      const updated = prev.map((c) => {
         if (c.id === chairId) {
           if (newStatus === 'Available' || newStatus === 'Sanitizing') {
             return {
@@ -70,8 +79,10 @@ export const ChairManagementGrid: React.FC<ChairManagementGridProps> = ({
           return { ...c, status: newStatus };
         }
         return c;
-      })
-    );
+      });
+      saveStoredChairs(updated);
+      return updated;
+    });
   };
 
   const statusColors: Record<ChairStatus['status'], { bg: string; border: string; text: string; dot: string }> = {
@@ -93,18 +104,20 @@ export const ChairManagementGrid: React.FC<ChairManagementGridProps> = ({
             <h3 className="text-sm font-extrabold text-zinc-900 flex items-center gap-2">
               <span>Dental Chairs & Operatory Management</span>
               <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-mono font-bold">
-                Live Status
+                {chairs.length} {chairs.length === 1 ? 'Chair' : 'Chairs'} Configured
               </span>
             </h3>
-            <p className="text-[11px] text-zinc-500">Real-time occupancy tracking for Chair 1, Chair 2, & Surgical Suite</p>
+            <p className="text-[11px] text-zinc-500">
+              Real-time occupancy tracking for {chairs.map((c) => c.name).join(' • ')}
+            </p>
           </div>
         </div>
       </div>
 
       {/* Grid of Chairs */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 w-full">
+      <div className={`grid grid-cols-1 ${chairs.length > 1 ? 'md:grid-cols-2 lg:grid-cols-3' : 'max-w-md'} gap-4 w-full`}>
         {chairs.map((chair) => {
-          const cfg = statusColors[chair.status];
+          const cfg = statusColors[chair.status] || statusColors.Available;
 
           return (
             <div

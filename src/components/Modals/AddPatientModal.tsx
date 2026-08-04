@@ -5,9 +5,10 @@ import { UserPlus, X, AlertTriangle, UserCheck } from 'lucide-react';
 interface AddPatientModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAddPatient: (patientData: Omit<Patient, 'id' | 'mrn' | 'createdAt' | 'teethMap' | 'treatmentPlans' | 'prescriptions' | 'invoices' | 'appointments' | 'followUps' | 'media'>) => void;
+  onAddPatient: (patientData: Omit<Patient, 'id' | 'mrn' | 'createdAt' | 'teethMap' | 'treatmentPlans' | 'prescriptions' | 'invoices' | 'appointments' | 'followUps' | 'media'>) => Patient | void;
   existingPatients?: Patient[];
   onSelectExistingPatient?: (patientId: string) => void;
+  onPatientSaved?: (patient: Patient) => void;
 }
 
 export const AddPatientModal: React.FC<AddPatientModalProps> = ({
@@ -16,6 +17,7 @@ export const AddPatientModal: React.FC<AddPatientModalProps> = ({
   onAddPatient,
   existingPatients = [],
   onSelectExistingPatient,
+  onPatientSaved,
 }) => {
   const [name, setName] = useState('');
   const [age, setAge] = useState<number>(30);
@@ -56,7 +58,7 @@ export const AddPatientModal: React.FC<AddPatientModalProps> = ({
     ].filter(Boolean);
     const formattedAddress = fullAddrParts.join(', ');
 
-    onAddPatient({
+    const createdPatient = onAddPatient({
       name: name.trim(),
       age,
       gender,
@@ -79,6 +81,10 @@ export const AddPatientModal: React.FC<AddPatientModalProps> = ({
         pulseRate: 72,
       },
     });
+
+    if (createdPatient && onPatientSaved) {
+      onPatientSaved(createdPatient);
+    }
 
     onClose();
   };

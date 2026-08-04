@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Appointment, Patient } from '../../types';
+import { getStoredChairs } from '../../utils/storage';
 import { Clock, Plus, Trash2, User, UserCheck, AlertCircle, X, ChevronRight } from 'lucide-react';
 
 interface WaitingListDrawerProps {
@@ -160,9 +161,11 @@ export const WaitingListDrawer: React.FC<WaitingListDrawerProps> = ({
                         onChange={(e) => setTargetChair(e.target.value as any)}
                         className="w-full p-1.5 bg-zinc-50 border border-zinc-200 rounded-lg text-xs font-bold"
                       >
-                        <option value="Chair 1 (Main Operatory)">Chair 1 (Main)</option>
-                        <option value="Chair 2 (Minor Procedures)">Chair 2 (Minor)</option>
-                        <option value="Chair 3 (Surgical Suite)">Chair 3 (Surgical)</option>
+                        {getStoredChairs().map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
                       </select>
                     </div>
 

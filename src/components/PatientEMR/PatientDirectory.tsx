@@ -98,7 +98,7 @@ export const PatientDirectory: React.FC<PatientDirectoryProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filtered.map((patient) => {
           // Calculate pending balance
-          const totalBalance = patient.invoices.reduce((sum, inv) => sum + inv.balanceDue, 0);
+          const totalBalance = (patient.invoices || []).reduce((sum, inv) => sum + inv.balanceDue, 0);
 
           return (
             <div

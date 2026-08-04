@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { DoctorProfile, UserRole, UserCredentials, ThemePalette } from '../../types';
+import { DoctorProfile, UserRole, UserCredentials, ThemePalette, ChairStatus } from '../../types';
 import { 
   getStoredCredentials, 
   saveCredentials, 
@@ -9,7 +9,9 @@ import {
   saveCustomClinicLogo,
   getStoredCustomAppIcon,
   saveCustomAppIcon,
-  resetCustomBranding
+  resetCustomBranding,
+  getStoredChairs,
+  saveStoredChairs
 } from '../../utils/storage';
 import {
   exportEncryptedBackup,
@@ -44,9 +46,24 @@ import {
   FileCheck,
   Clock,
   AlertTriangle,
-  Printer
+  Printer,
+  Armchair,
+  Plus,
+  Edit2,
+  Check,
+  FileImage,
+  CloudCheck,
+  RefreshCw,
+  Server,
+  LayoutDashboard,
 } from 'lucide-react';
 import { PrintDesignerModule } from '../PrintDesigner/PrintDesignerModule';
+import { DashboardPersonalizationSection } from '../Settings/DashboardPersonalizationSection';
+import {
+  performSupabaseCloudBackup,
+  restoreFromSupabaseCloud,
+  getStoredCloudSyncTime,
+} from '../../utils/supabaseCloudBackup';
 
 interface SettingsViewProps {
   doctor: DoctorProfile;
@@ -77,13 +94,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [brandingSavedSuccess, setBrandingSavedSuccess] = useState(false);
 
   // Data Protection & Backup State
-  const [activeSection, setActiveSection] = useState<'profile' | 'print' | 'backup'>('profile');
+  const [activeSection, setActiveSection] = useState<'profile' | 'chairs' | 'dashboard' | 'print' | 'backup'>('profile');
+
   const [backupFreq, setBackupFreq] = useState<BackupFrequency>(getBackupReminderFrequency());
   const [lastBackup, setLastBackup] = useState<string | null>(getLastBackupTimestamp());
+  const [lastCloudSync, setLastCloudSync] = useState<string | null>(getStoredCloudSyncTime());
+  const [isCloudSyncing, setIsCloudSyncing] = useState<boolean>(false);
+  const [cloudRestoreMessage, setCloudRestoreMessage] = useState<string | null>(null);
   const [backupNotice, setBackupNotice] = useState<string | null>(null);
   const [restoreCandidate, setRestoreCandidate] = useState<BackupData | null>(null);
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [restoreSuccess, setRestoreSuccess] = useState<string | null>(null);
+
+  // Chair Management State
+  const [configuredChairs, setConfiguredChairs] = useState<ChairStatus[]>(getStoredChairs());
+  const [newChairName, setNewChairName] = useState('');
+  const [editingChairId, setEditingChairId] = useState<string | null>(null);
+  const [editingChairName, setEditingChairName] = useState('');
+  const [chairNotice, setChairNotice] = useState<string | null>(null);
 
   useEffect(() => {
     setCredentials(getStoredCredentials());
@@ -92,7 +120,47 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setAppIcon(getStoredCustomAppIcon());
     setBackupFreq(getBackupReminderFrequency());
     setLastBackup(getLastBackupTimestamp());
+    setLastCloudSync(getStoredCloudSyncTime());
   }, []);
+
+  const handleManualCloudBackup = async () => {
+    setIsCloudSyncing(true);
+    setBackupNotice(null);
+    try {
+      const res = await performSupabaseCloudBackup(undefined, doctor);
+      if (res.success) {
+        setLastCloudSync(res.timestamp);
+        setBackupNotice('Clinic data backed up to Supabase Cloud successfully!');
+        setTimeout(() => setBackupNotice(null), 4000);
+      }
+    } catch (err: any) {
+      setBackupNotice('Cloud backup error: ' + (err.message || 'Unknown error'));
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
+
+  const handleRestoreFromCloud = async () => {
+    if (activeRole !== 'admin') return;
+    setIsCloudSyncing(true);
+    setCloudRestoreMessage(null);
+    setRestoreError(null);
+    try {
+      const res = await restoreFromSupabaseCloud();
+      if (res.success) {
+        setCloudRestoreMessage(res.message);
+        setTimeout(() => {
+          window.location.reload();
+        }, 2000);
+      } else {
+        setRestoreError(res.message);
+      }
+    } catch (err: any) {
+      setRestoreError('Cloud restore error: ' + (err.message || 'Unknown error'));
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
 
   const handleDownloadBackup = () => {
     try {
@@ -144,7 +212,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'clinicLogo' | 'appIcon') => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'clinicLogo' | 'appIcon') => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -154,6 +222,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       return;
     }
 
+    // Try multi-tenant Supabase storage upload ({clinic_id}/logos/{filename})
+    try {
+      const { uploadClinicFile } = await import('../../utils/supabaseMultiTenant');
+      const uploaded = await uploadClinicFile(file, 'logos', undefined, doctor);
+      if (uploaded?.url) {
+        if (type === 'clinicLogo') {
+          setClinicLogo(uploaded.url);
+          saveCustomClinicLogo(uploaded.url);
+        } else {
+          setAppIcon(uploaded.url);
+          saveCustomAppIcon(uploaded.url);
+        }
+        setBrandingSavedSuccess(true);
+        setTimeout(() => setBrandingSavedSuccess(false), 3000);
+        window.dispatchEvent(new Event('custom-branding-updated'));
+        return;
+      }
+    } catch (sbErr) {
+      console.info('Supabase storage fallback to local Base64 branding:', sbErr);
+    }
+
+    // Local Base64 fallback
     const reader = new FileReader();
     reader.onload = (event) => {
       const base64 = event.target?.result as string;
@@ -210,6 +300,69 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const handleThemeChange = (theme: ThemePalette) => {
     setCurrentTheme(theme);
     saveStoredTheme(theme);
+  };
+
+  const handleSetSingleChairPreset = () => {
+    const singleChair: ChairStatus[] = [
+      {
+        id: 'Chair 1 (Main Operatory)',
+        name: 'Chair 1 - Main Operatory',
+        status: 'Available',
+      },
+    ];
+    setConfiguredChairs(singleChair);
+    saveStoredChairs(singleChair);
+    setChairNotice('Set to 1 Chair (Single Operatory Clinic) successfully!');
+    setTimeout(() => setChairNotice(null), 3000);
+  };
+
+  const handleAddChair = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newChairName.trim()) return;
+    const chairNum = configuredChairs.length + 1;
+    const newId = `Chair ${chairNum} (${newChairName.trim()})`;
+    const updated = [
+      ...configuredChairs,
+      {
+        id: newId,
+        name: `Chair ${chairNum} - ${newChairName.trim()}`,
+        status: 'Available' as const,
+      },
+    ];
+    setConfiguredChairs(updated);
+    saveStoredChairs(updated);
+    setNewChairName('');
+    setChairNotice(`Added "${newChairName.trim()}" successfully! Live Dashboard updated.`);
+    setTimeout(() => setChairNotice(null), 3000);
+  };
+
+  const handleDeleteChair = (chairId: string) => {
+    if (configuredChairs.length <= 1) {
+      alert('You must keep at least 1 dental chair configured for your clinic.');
+      return;
+    }
+    const updated = configuredChairs.filter((c) => c.id !== chairId);
+    setConfiguredChairs(updated);
+    saveStoredChairs(updated);
+    setChairNotice('Chair deleted successfully! Live Dashboard updated.');
+    setTimeout(() => setChairNotice(null), 3000);
+  };
+
+  const handleStartRename = (c: ChairStatus) => {
+    setEditingChairId(c.id);
+    setEditingChairName(c.name);
+  };
+
+  const handleSaveRename = (chairId: string) => {
+    if (!editingChairName.trim()) return;
+    const updated = configuredChairs.map((c) =>
+      c.id === chairId ? { ...c, name: editingChairName.trim() } : c
+    );
+    setConfiguredChairs(updated);
+    saveStoredChairs(updated);
+    setEditingChairId(null);
+    setChairNotice('Chair renamed successfully!');
+    setTimeout(() => setChairNotice(null), 3000);
   };
 
   const themeOptions: { id: ThemePalette; name: string; desc: string; primary: string; accent: string; bg: string }[] = [
@@ -295,6 +448,32 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
         <button
           type="button"
+          onClick={() => setActiveSection('chairs')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
+            activeSection === 'chairs'
+              ? 'bg-amber-600 text-white shadow-md'
+              : 'bg-theme-card text-theme-secondary hover:text-theme-main border border-theme-border'
+          }`}
+        >
+          <Armchair className="w-4 h-4 text-amber-300" />
+          <span>Dental Chairs & Operatories ({configuredChairs.length})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSection('dashboard')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
+            activeSection === 'dashboard'
+              ? 'bg-sky-600 text-white shadow-md'
+              : 'bg-theme-card text-theme-secondary hover:text-theme-main border border-theme-border'
+          }`}
+        >
+          <LayoutDashboard className="w-4 h-4 text-sky-300" />
+          <span>Dashboard Personalization</span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveSection('print')}
           className={`px-4 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
             activeSection === 'print'
@@ -303,8 +482,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           }`}
         >
           <Printer className="w-4 h-4 text-purple-300" />
-          <span>Print Designer Engine (Phase 1)</span>
+          <span>A4 Invoice & PDF Designer</span>
         </button>
+
 
         <button
           type="button"
@@ -320,9 +500,145 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </button>
       </div>
 
-      {/* Print Designer View */}
+      {/* Chair Settings View */}
+      {activeSection === 'chairs' && (
+        <div className="bg-theme-card p-6 rounded-[28px] border border-theme-border shadow-[0_10px_30px_rgba(0,0,0,0.03)] space-y-6 text-theme-main">
+          {/* Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-theme-border pb-4">
+            <div>
+              <h3 className="text-lg font-black text-theme-main flex items-center gap-2">
+                <Armchair className="w-5 h-5 text-amber-500" />
+                <span>Dental Chair & Operatory Management</span>
+              </h3>
+              <p className="text-xs text-theme-secondary mt-1">
+                Configure the active operatory chairs for this branch. Changes instantly sync to the Dashboard grid and scheduler.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleSetSingleChairPreset}
+              className="px-3.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 text-xs font-extrabold transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
+            >
+              <Check className="w-4 h-4 text-amber-700" />
+              <span>Set to 1 Chair (Single Operatory Clinic)</span>
+            </button>
+          </div>
+
+          {/* Success Notice Banner */}
+          {chairNotice && (
+            <div className="p-3 bg-emerald-50 text-emerald-900 border border-emerald-300 rounded-xl text-xs font-bold flex items-center gap-2 animate-fadeIn">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{chairNotice}</span>
+            </div>
+          )}
+
+          {/* Active Chairs Grid */}
+          <div className="space-y-3">
+            <h4 className="text-xs font-extrabold text-theme-secondary uppercase tracking-wider">
+              Configured Chairs ({configuredChairs.length})
+            </h4>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {configuredChairs.map((c, index) => (
+                <div
+                  key={c.id}
+                  className="p-4 rounded-2xl border border-theme-border bg-theme-page/60 flex items-center justify-between gap-3 shadow-2xs hover:shadow-xs transition-all"
+                >
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-200 flex items-center justify-center font-black text-sm shrink-0">
+                      💺
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      {editingChairId === c.id ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={editingChairName}
+                            onChange={(e) => setEditingChairName(e.target.value)}
+                            className="px-2 py-1 text-xs font-bold rounded-lg bg-theme-card border border-theme-accent text-theme-main outline-none w-full"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleSaveRename(c.id)}
+                            className="p-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span className="font-extrabold text-sm text-theme-main truncate">{c.name}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleStartRename(c)}
+                            className="text-theme-secondary hover:text-theme-main p-1 cursor-pointer"
+                            title="Rename Chair"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
+
+                      <div className="flex items-center gap-2 text-[11px] font-mono text-theme-secondary mt-0.5">
+                        <span>ID: {c.id}</span>
+                        <span>•</span>
+                        <span className="text-emerald-700 dark:text-emerald-400 font-bold">Status: {c.status}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions: Delete Chair Button */}
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteChair(c.id)}
+                    className="p-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:hover:bg-rose-900/60 dark:text-rose-300 border border-rose-200 dark:border-rose-900 transition-all cursor-pointer shrink-0 flex items-center gap-1 text-xs font-extrabold"
+                    title="Delete this chair"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span className="hidden sm:inline">Delete</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Add New Chair Form */}
+          <form onSubmit={handleAddChair} className="pt-4 border-t border-theme-border space-y-3">
+            <h4 className="text-xs font-extrabold text-theme-secondary uppercase tracking-wider">
+              Add New Operatory Chair
+            </h4>
+            <div className="flex flex-col sm:flex-row items-center gap-3">
+              <input
+                type="text"
+                placeholder="e.g. Hygiene & Scaling Chair, Surgical OT 2"
+                value={newChairName}
+                onChange={(e) => setNewChairName(e.target.value)}
+                className="flex-1 w-full px-4 py-2.5 rounded-xl bg-theme-page border border-theme-border text-theme-main text-xs font-bold outline-none focus:border-theme-accent"
+              />
+              <button
+                type="submit"
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs shadow-xs transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Chair</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Dashboard Personalization Settings View */}
+      {activeSection === 'dashboard' && (
+        <DashboardPersonalizationSection doctor={doctor} />
+      )}
+
+      {/* A4 Invoice & PDF Print Customizer Settings View */}
       {activeSection === 'print' && (
-        <PrintDesignerModule doctor={doctor} />
+        <div className="space-y-5">
+          <PrintDesignerModule doctor={doctor} />
+        </div>
       )}
 
       {/* Profile & Theme View */}
@@ -384,7 +700,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
       </div>
 
-      {/* Clinic Branding & Logo Settings Card */}
+      {/* Clinic Branding & Logo Settings Card (Admin Only) */}
+      {activeRole === 'admin' && (
       <div className="bg-theme-card p-6 rounded-[28px] border border-theme-border shadow-[0_10px_30px_rgba(0,0,0,0.03)] space-y-5 text-theme-main">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-theme-border pb-3 gap-2">
           <div>
@@ -554,6 +871,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
       </div>
+      )}
 
       {/* Admin Credentials Manager Section */}
       {activeRole === 'admin' ? (
@@ -775,21 +1093,85 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
       {/* Production-Grade Data Protection, Encrypted Backup & Restore Card */}
       {activeSection === 'backup' && (
-      <div className="bg-white p-6 rounded-[28px] border border-[#E8ECF3] shadow-[0_10px_30px_rgba(0,0,0,0.03)] space-y-5 text-xs text-[#1E293B]">
-        <div className="border-b border-[#E8ECF3] pb-3 flex items-center justify-between">
+      <div className="bg-white p-6 rounded-[28px] border border-[#E8ECF3] shadow-[0_10px_30px_rgba(0,0,0,0.03)] space-y-6 text-xs text-[#1E293B]">
+        <div className="border-b border-[#E8ECF3] pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-indigo-700 font-bold text-base">
             <Database className="w-5 h-5 text-indigo-600" />
-            <span>Encrypted Data Protection & Clinic Backup Engine</span>
+            <span>Automated Cloud Backup & Disaster Recovery Engine</span>
           </div>
-          <span className="px-3 py-1 bg-indigo-50 border border-indigo-200 text-indigo-800 rounded-full text-[11px] font-bold">
-            Dual Save & IndexedDB Active
+          <span className="px-3.5 py-1 bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-full text-xs font-extrabold flex items-center gap-1.5 self-start sm:self-auto">
+            <CloudCheck className="w-4 h-4 text-emerald-600" />
+            <span>Supabase Cloud Auto-Sync Active</span>
           </span>
         </div>
 
-        <p className="text-[#64748B] text-xs font-medium leading-relaxed">
-          FABIS MediCare automatically retains all patient records, EMR notes, prescriptions, and billing invoices in IndexedDB & Cloud database.
-          You can create encrypted, portable backups (`.fabis`) to preserve clinic history for years.
-        </p>
+        {/* Supabase Cloud Auto-Sync Banner & Controls */}
+        <div className="p-5 rounded-2xl bg-gradient-to-r from-teal-900 via-slate-900 to-indigo-950 text-white space-y-4 shadow-md border border-teal-800/40">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 font-black text-sm text-teal-300">
+                <Server className="w-4 h-4 text-teal-300" />
+                <span>Live Supabase Cloud Sync & Failsafe Storage</span>
+              </div>
+              <p className="text-xs text-slate-300 font-medium max-w-2xl">
+                Background auto-sync routinely backs up all clinic data (Patients, Appointments, Treatments, Bills, Prescriptions, Settings, Branding, and Reports) to the Supabase database.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={handleManualCloudBackup}
+                disabled={isCloudSyncing}
+                className="px-4 py-2.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-extrabold text-xs transition-all cursor-pointer shadow-xs flex items-center gap-2 disabled:opacity-50"
+              >
+                <RefreshCw className={`w-4 h-4 text-slate-950 ${isCloudSyncing ? 'animate-spin' : ''}`} />
+                <span>{isCloudSyncing ? 'Syncing...' : 'Backup Now to Cloud'}</span>
+              </button>
+
+              {activeRole === 'admin' && (
+                <button
+                  type="button"
+                  onClick={handleRestoreFromCloud}
+                  disabled={isCloudSyncing}
+                  className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs transition-all cursor-pointer shadow-xs flex items-center gap-2 disabled:opacity-50"
+                  title="Admin-only: Recover all clinic data from cloud snapshot without duplicates"
+                >
+                  <UploadCloud className="w-4 h-4 text-slate-950" />
+                  <span>Restore from Cloud Backup</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-4 text-[11px] font-mono pt-2 border-t border-slate-700/60 text-slate-300">
+            <div>
+              Last Cloud Backup:{' '}
+              <span className="font-bold text-teal-300">
+                {lastCloudSync ? new Date(lastCloudSync).toLocaleString() : 'Just now'}
+              </span>
+            </div>
+            <div>•</div>
+            <div>
+              Sync Status:{' '}
+              <span className="font-bold text-emerald-400">
+                {isCloudSyncing ? 'Syncing...' : 'Synced & Secured'}
+              </span>
+            </div>
+            <div>•</div>
+            <div>
+              Duplicate Prevention:{' '}
+              <span className="font-bold text-amber-300">Active (MRN & ID Deduplication)</span>
+            </div>
+          </div>
+        </div>
+
+        {cloudRestoreMessage && (
+          <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 p-4 rounded-2xl flex items-center gap-2.5 text-xs font-bold animate-fadeIn">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+            <span>{cloudRestoreMessage}</span>
+          </div>
+        )}
 
         {backupNotice && (
           <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3.5 rounded-2xl flex items-center gap-2 text-xs font-bold">

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { ClinicalMedia, Patient } from '../../types';
 import { formatDate } from '../../utils/formatters';
-import { FileText, Image as ImageIcon, Plus, Trash2, Eye, Upload, Tag, X } from 'lucide-react';
+import { FileText, Image as ImageIcon, Plus, Trash2, Eye, Upload, Tag, X, Loader2 } from 'lucide-react';
+import { uploadClinicFile, deleteClinicFile } from '../../utils/supabaseMultiTenant';
 
 interface DocumentVaultModuleProps {
   patient: Patient;
@@ -22,12 +23,15 @@ export const DocumentVaultModule: React.FC<DocumentVaultModuleProps> = ({
   const [categoryInput, setCategoryInput] = useState<ClinicalMedia['category']>('IOPA X-Ray');
   const [notesInput, setNotesInput] = useState<string>('');
   const [fileDataUrl, setFileDataUrl] = useState<string>('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState<boolean>(false);
 
   const categories = ['All', 'OPG', 'IOPA X-Ray', 'Intraoral Photo', 'CT Scan', 'Lab Report'];
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setSelectedFile(file);
       const reader = new FileReader();
       reader.onloadend = () => {
         setFileDataUrl(reader.result as string);
@@ -39,11 +43,23 @@ export const DocumentVaultModule: React.FC<DocumentVaultModuleProps> = ({
     }
   };
 
-  const handleUploadSubmit = (e: React.FormEvent) => {
+  const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!titleInput.trim()) return;
 
-    // Use uploaded file DataURL or a realistic dental X-ray/document placeholder
+    setIsUploading(true);
+    let finalUrl = fileDataUrl;
+    let filePath: string | undefined = undefined;
+
+    if (selectedFile) {
+      const uploaded = await uploadClinicFile(selectedFile, 'patients', patient.id);
+      if (uploaded) {
+        finalUrl = uploaded.url || fileDataUrl;
+        filePath = uploaded.path;
+      }
+    }
+
+    // Use uploaded file URL or a realistic dental X-ray/document placeholder
     const sampleXrayPlaceholder =
       categoryInput === 'OPG'
         ? 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?w=800&auto=format&fit=crop&q=80'
@@ -57,7 +73,8 @@ export const DocumentVaultModule: React.FC<DocumentVaultModuleProps> = ({
       title: titleInput.trim(),
       category: categoryInput,
       date: new Date().toISOString().split('T')[0],
-      url: fileDataUrl || sampleXrayPlaceholder,
+      url: finalUrl || sampleXrayPlaceholder,
+      filePath,
       tags: [categoryInput, 'Vault File'],
       notes: notesInput.trim() || undefined,
     };
@@ -70,11 +87,17 @@ export const DocumentVaultModule: React.FC<DocumentVaultModuleProps> = ({
     setTitleInput('');
     setNotesInput('');
     setFileDataUrl('');
+    setSelectedFile(null);
+    setIsUploading(false);
     setIsUploadOpen(false);
   };
 
-  const handleDeleteMedia = (id: string) => {
+  const handleDeleteMedia = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this document/X-ray file?')) {
+      const mediaItem = mediaList.find((m) => m.id === id);
+      if (mediaItem?.filePath) {
+        await deleteClinicFile(mediaItem.filePath);
+      }
       const updated = mediaList.filter((m) => m.id !== id);
       setMediaList(updated);
       onUpdateMedia(updated);

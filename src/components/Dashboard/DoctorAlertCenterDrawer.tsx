@@ -48,7 +48,7 @@ export const DoctorAlertCenterDrawer: React.FC<DoctorAlertCenterDrawerProps> = (
   // Collect all follow-ups across all patients
   const allFollowUps = useMemo(() => {
     return patients.flatMap((p) =>
-      p.followUps.map((f) => ({
+      (p.followUps || []).map((f) => ({
         ...f,
         patientMrn: p.mrn,
         patientAge: p.age,
