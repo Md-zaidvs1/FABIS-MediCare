@@ -65,18 +65,52 @@ export function getLastVisitAndTreatment(patient: Patient) {
   return { lastVisitDate, lastTxName };
 }
 
-// Converts Universal Tooth Number (1-32) to FDI Notation (11-48)
+// Converts Universal Tooth Number (1-32) to FDI Notation (11-48), or returns FDI notation as-is
 export const universalToFDI = (universalNum: number): number => {
   if (universalNum >= 1 && universalNum <= 8) return 19 - universalNum; // 1 -> 18, 8 -> 11
   if (universalNum >= 9 && universalNum <= 16) return 12 + universalNum; // 9 -> 21, 16 -> 28
   if (universalNum >= 17 && universalNum <= 24) return 55 - universalNum; // 17 -> 38, 24 -> 31
   if (universalNum >= 25 && universalNum <= 32) return 16 + universalNum; // 25 -> 41, 32 -> 48
-  return universalNum;
+  return universalNum; // Already FDI (11-48) or Primary FDI (51-85)
 };
 
-// Gets descriptive name for tooth 1..32
+export const getFDIForTooth = (toothNum: number): number => {
+  return universalToFDI(toothNum);
+};
+
+export const isPrimaryTooth = (toothNum: number): boolean => {
+  const fdi = universalToFDI(toothNum);
+  const quad = Math.floor(fdi / 10);
+  return quad >= 5 && quad <= 8;
+};
+
+// Gets descriptive name for tooth (1..32 Universal or 11..85 FDI)
 export const getToothName = (toothNum: number): string => {
   const fdi = universalToFDI(toothNum);
+  const quad = Math.floor(fdi / 10);
+  const pos = fdi % 10;
+
+  if (quad >= 5 && quad <= 8) {
+    const primaryQuadMap: Record<number, string> = {
+      5: 'Upper Right Primary',
+      6: 'Upper Left Primary',
+      7: 'Lower Left Primary',
+      8: 'Lower Right Primary',
+    };
+    const primaryTypeMap: Record<number, string> = {
+      1: 'Central Incisor',
+      2: 'Lateral Incisor',
+      3: 'Canine',
+      4: 'First Molar',
+      5: 'Second Molar',
+    };
+
+    const quadName = primaryQuadMap[quad] || 'Primary';
+    const toothName = primaryTypeMap[pos] || `Tooth FDI ${fdi}`;
+
+    return `${quadName} ${toothName} (FDI ${fdi})`;
+  }
+
   const quadrantMap: Record<number, string> = {
     1: 'Upper Right',
     2: 'Upper Left',
@@ -94,13 +128,10 @@ export const getToothName = (toothNum: number): string => {
     8: 'Third Molar (Wisdom)',
   };
 
-  const quad = Math.floor(fdi / 10);
-  const pos = fdi % 10;
-
   const quadName = quadrantMap[quad] || '';
-  const toothName = toothTypeMap[pos] || `Tooth #${toothNum}`;
+  const toothName = toothTypeMap[pos] || `Tooth FDI ${fdi}`;
 
-  return `${quadName} ${toothName} (#${toothNum} / FDI ${fdi})`;
+  return `${quadName} ${toothName} (FDI ${fdi})`;
 };
 
 // Condition Colors and Display Names

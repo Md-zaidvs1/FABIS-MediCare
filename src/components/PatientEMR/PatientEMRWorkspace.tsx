@@ -21,7 +21,7 @@ import { SurfaceSelector } from '../TeethChart/SurfaceSelector';
 import { PerioChartModule } from '../TeethChart/PerioChartModule';
 import { SOAPTemplatesModal } from './SOAPTemplatesModal';
 import { PhasedTreatmentPlan } from './PhasedTreatmentPlan';
-import { formatCurrency, formatDate, CONDITION_CONFIG, getToothName, getLastVisitAndTreatment } from '../../utils/formatters';
+import { formatCurrency, formatDate, CONDITION_CONFIG, getToothName, getFDIForTooth, universalToFDI, getLastVisitAndTreatment } from '../../utils/formatters';
 import { shareInvoicePdf, sharePrescriptionPdf, generateInvoiceThermalJsPdf, printPdfBlob } from '../../utils/pdfShare';
 import { QUICK_DIAGNOSES, QUICK_TREATMENTS, DEFAULT_TREATMENT_TEMPLATES } from '../../data/initialData';
 import { 
@@ -177,7 +177,7 @@ export const PatientEMRWorkspace: React.FC<PatientEMRWorkspaceProps> = ({
 
   const selectedToothRecord: ToothRecord = patient.teethMap[selectedToothNum] || {
     toothNumber: selectedToothNum,
-    fdiNumber: selectedToothNum,
+    fdiNumber: getFDIForTooth(selectedToothNum),
     name: getToothName(selectedToothNum),
     condition: 'Healthy',
   };

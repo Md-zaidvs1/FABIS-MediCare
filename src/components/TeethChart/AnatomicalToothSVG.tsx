@@ -1,5 +1,6 @@
 import React from 'react';
 import { ToothCondition } from '../../types';
+import { universalToFDI } from '../../utils/formatters';
 
 interface AnatomicalToothSVGProps {
   toothNumber: number;
@@ -17,11 +18,24 @@ export type ToothCategory =
   | 'wisdom';
 
 export const getToothCategory = (num: number): ToothCategory => {
-  if (num === 1 || num === 16 || num === 17 || num === 32) return 'wisdom';
-  if ([2, 3, 14, 15, 18, 19, 30, 31].includes(num)) return 'molar';
-  if ([4, 5, 12, 13, 20, 21, 28, 29].includes(num)) return 'premolar';
-  if ([6, 11, 22, 27].includes(num)) return 'canine';
-  if ([7, 10, 23, 26].includes(num)) return 'incisor_lateral';
+  const fdi = universalToFDI(num);
+  const pos = fdi % 10;
+  const quad = Math.floor(fdi / 10);
+
+  // Primary teeth (quadrants 5-8)
+  if (quad >= 5 && quad <= 8) {
+    if (pos === 1) return 'incisor_central';
+    if (pos === 2) return 'incisor_lateral';
+    if (pos === 3) return 'canine';
+    return 'molar'; // 4 & 5 are primary molars
+  }
+
+  // Permanent teeth
+  if (pos === 8) return 'wisdom';
+  if (pos === 6 || pos === 7) return 'molar';
+  if (pos === 4 || pos === 5) return 'premolar';
+  if (pos === 3) return 'canine';
+  if (pos === 2) return 'incisor_lateral';
   return 'incisor_central';
 };
 
@@ -30,11 +44,13 @@ export const AnatomicalToothSVG: React.FC<AnatomicalToothSVGProps> = ({
   condition,
   isSelected,
 }) => {
-  const isUpper = toothNumber <= 16;
+  const fdi = universalToFDI(toothNumber);
+  const quad = Math.floor(fdi / 10);
+  const isUpper = quad === 1 || quad === 2 || quad === 5 || quad === 6 || (toothNumber >= 1 && toothNumber <= 16);
   const category = getToothCategory(toothNumber);
 
   // Unique SVG IDs for gradients per tooth
-  const gradientPrefix = `tooth-${toothNumber}`;
+  const gradientPrefix = `tooth-${fdi}`;
 
   // Missing Tooth State Rendering
   if (condition === 'Missing') {
