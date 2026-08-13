@@ -40,6 +40,7 @@ import { AppointmentsView } from './components/Views/AppointmentsView';
 import { BillingView } from './components/Views/BillingView';
 import { PrescriptionsView } from './components/Views/PrescriptionsView';
 import { SettingsView } from './components/Views/SettingsView';
+import { SmsCenterView } from './components/Views/SmsCenterView';
 
 // Modals
 import { AddPatientModal } from './components/Modals/AddPatientModal';
@@ -47,6 +48,7 @@ import { BookAppointmentModal } from './components/Modals/BookAppointmentModal';
 import { CreateInvoiceModal } from './components/Modals/CreateInvoiceModal';
 import { PrescriptionModal } from './components/Modals/PrescriptionModal';
 import { ViewInvoiceModal } from './components/Modals/ViewInvoiceModal';
+import { DoctorAlertCenterDrawer } from './components/Dashboard/DoctorAlertCenterDrawer';
 
 export default function App() {
   const [isLoggedIn, setIsLoggedInState] = useState<boolean>(checkIsLoggedIn);
@@ -66,6 +68,8 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState<NavigationTab>('dashboard');
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
+  const [patientInitialTab, setPatientInitialTab] = useState<'overview' | 'teethMap' | 'perio' | 'treatments' | 'prescriptions' | 'invoices' | 'timeline' | 'media'>('overview');
+  const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Modals state
@@ -413,14 +417,14 @@ export default function App() {
     updatePatients(updated);
   };
 
-  const handleUpdateFollowUpStatus = (followUpId: string, status: FollowUpTask['status']) => {
+  const handleUpdateFollowUpStatus = (followUpId: string, status: FollowUpTask['status'] = 'Completed') => {
     const updated = patients.map((p) => {
       const followUps = p.followUps || [];
       const flwExists = followUps.some((f) => f.id === followUpId);
       if (!flwExists) return p;
       return {
         ...p,
-        followUps: followUps.map((f) => (f.id === followUpId ? { ...f, status } : f)),
+        followUps: followUps.map((f) => (f.id === followUpId ? { ...f, status: status || 'Completed' } : f)),
       };
     });
     updatePatients(updated);
@@ -502,10 +506,25 @@ export default function App() {
       patientName: targetPatient.name,
     };
 
+    const todayIsoStr = formatTodayISO();
+
     const updated = patients.map((p) => {
       if (p.id !== patientId) return p;
+
+      // Automatically complete today's active appointments when patient is billed
+      const updatedAppointments = (p.appointments || []).map((apt) => {
+        if (
+          apt.date === todayIsoStr &&
+          (apt.status === 'In-Chair' || apt.status === 'In Consultation' || apt.status === 'Arrived' || apt.status === 'Waiting-List')
+        ) {
+          return { ...apt, status: 'Completed' as const };
+        }
+        return apt;
+      });
+
       return {
         ...p,
+        appointments: updatedAppointments,
         invoices: [newInvoice, ...(p.invoices || [])],
       };
     });
@@ -575,6 +594,7 @@ export default function App() {
         onSearchChange={setSearchQuery}
         onSelectPatient={(id) => {
           setSelectedPatientId(id);
+          setPatientInitialTab('overview');
           setActiveTab('patients');
         }}
         onOpenAddPatient={() => setIsAddPatientOpen(true)}
@@ -594,6 +614,7 @@ export default function App() {
         onResetDemoData={handleResetDemoData}
         onLogout={handleLogout}
         onSwitchRole={handleSwitchRole}
+        onOpenNotificationCenter={() => setIsNotificationCenterOpen(true)}
       />
 
       {/* Main Body Shell */}
@@ -613,8 +634,9 @@ export default function App() {
             <Dashboard
               patients={patients}
               activeRole={activeRole}
-              onSelectPatient={(id) => {
+              onSelectPatient={(id, initialTab) => {
                 setSelectedPatientId(id);
+                setPatientInitialTab(initialTab || 'overview');
                 setActiveTab('patients');
               }}
               onOpenAddPatient={() => setIsAddPatientOpen(true)}
@@ -645,6 +667,7 @@ export default function App() {
               <PatientEMRWorkspace
                 patient={selectedPatient}
                 doctor={doctor}
+                initialTab={patientInitialTab}
                 onBackToDirectory={() => setSelectedPatientId(null)}
                 onUpdatePatientTeeth={handleUpdatePatientTeeth}
                 onAddTreatmentPlan={handleAddTreatmentPlan}
@@ -745,6 +768,10 @@ export default function App() {
               onResetDemoData={handleResetDemoData}
             />
           )}
+
+          {activeTab === 'sms' && (
+            <SmsCenterView />
+          )}
         </main>
       </div>
 
@@ -810,6 +837,25 @@ export default function App() {
         doctor={doctor}
         patient={patients.find((p) => p.id === viewingInvoice?.patientId)}
         invoice={viewingInvoice}
+      />
+
+      <DoctorAlertCenterDrawer
+        isOpen={isNotificationCenterOpen}
+        onClose={() => setIsNotificationCenterOpen(false)}
+        patients={patients}
+        onSelectPatient={(id, initialTab) => {
+          setSelectedPatientId(id);
+          setPatientInitialTab(initialTab || 'teethMap');
+          setActiveTab('patients');
+          setIsNotificationCenterOpen(false);
+        }}
+        onMarkCompleted={(id, status) => handleUpdateFollowUpStatus(id, status || 'Completed')}
+        onReschedule={handleRescheduleFollowUp}
+        onAddFollowUp={handleAddFollowUp}
+        onOpenSmsSettings={() => {
+          setActiveTab('sms');
+          setIsNotificationCenterOpen(false);
+        }}
       />
     </div>
   );

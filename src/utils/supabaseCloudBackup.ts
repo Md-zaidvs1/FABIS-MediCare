@@ -6,6 +6,7 @@ import {
   getActiveClinicId,
   upsertClinicRecords,
   fetchClinicRecords,
+  reinitSupabaseClient,
   supabaseClient as multiTenantSupabaseClient,
 } from './supabaseMultiTenant';
 import {
@@ -155,7 +156,13 @@ function mergeInvoices(invoicesA: any[], invoicesB: any[]): any[] {
 export const performSupabaseCloudBackup = async (
   customPatients?: Patient[],
   customDoctor?: DoctorProfile
-): Promise<{ success: boolean; timestamp: string }> => {
+): Promise<{
+  success: boolean;
+  timestamp: string;
+  message?: string;
+  patientCount?: number;
+  cloudSynced?: boolean;
+}> => {
   const now = new Date().toISOString();
   try {
     const patients = customPatients || getStoredPatients();
@@ -188,28 +195,45 @@ export const performSupabaseCloudBackup = async (
     localStorage.setItem(CLOUD_KEYS.LAST_CLOUD_SYNC, now);
     localStorage.setItem(CLOUD_KEYS.CLOUD_SYNC_STATUS, 'Synced');
 
-    // Perform Supabase cloud table upsert if connected (multi-tenant isolated by tenantClinicId)
-    if (supabaseClient) {
+    let isCloudSynced = false;
+    const syncDetails: string[] = [];
+
+    // Perform Supabase cloud table upsert if connected
+    const client = multiTenantSupabaseClient || reinitSupabaseClient();
+    if (client) {
       try {
-        await supabaseClient.from('clinic_backups').upsert(
+        const { error: cbErr } = await client.from('clinic_backups').upsert(
           {
             clinic_id: tenantClinicId,
             backup_payload: payload,
+            patient_count: patients.length,
             updated_at: now,
           },
           { onConflict: 'clinic_id' }
         );
 
-        // Also sync multi-tenant relational tables
-        if (patients.length > 0) {
-          await upsertClinicRecords('patients', patients, doctor, 'id');
+        if (!cbErr) {
+          isCloudSynced = true;
+          syncDetails.push('clinic_backups vault');
+        } else {
+          console.warn('Supabase `clinic_backups` write notice:', cbErr.message);
         }
+
+        // Sync patients table
+        if (patients.length > 0) {
+          const pSynced = await upsertClinicRecords('patients', patients, doctor, 'id');
+          if (pSynced) {
+            isCloudSynced = true;
+            syncDetails.push(`${patients.length} records in \`patients\` table`);
+          }
+        }
+
+        // Sync chairs table
         const chairs = getStoredChairs();
         if (chairs.length > 0) {
           await upsertClinicRecords('chairs', chairs, doctor, 'id');
         }
-      } catch (sbErr) {
-        // Fallback to local cloud backup vault silently
+      } catch (sbErr: any) {
         console.info('Supabase cloud table sync notice (local cloud vault secured):', sbErr);
       }
     }
@@ -217,11 +241,27 @@ export const performSupabaseCloudBackup = async (
     // Dual-save snapshot to IndexedDB as well
     await dualSaveSnapshot(patients);
 
-    return { success: true, timestamp: now };
-  } catch (err) {
+    const message = isCloudSynced
+      ? `Successfully backed up to Supabase Cloud (${syncDetails.join(', ')})!`
+      : `Successfully secured local vault backup (${patients.length} patient records)!`;
+
+    return {
+      success: true,
+      timestamp: now,
+      message,
+      patientCount: patients.length,
+      cloudSynced: isCloudSynced,
+    };
+  } catch (err: any) {
     console.error('Error during Supabase cloud backup execution:', err);
     localStorage.setItem(CLOUD_KEYS.CLOUD_SYNC_STATUS, 'Error');
-    return { success: false, timestamp: now };
+    return {
+      success: false,
+      timestamp: now,
+      message: `Backup error: ${err.message || 'Unknown error'}`,
+      patientCount: 0,
+      cloudSynced: false,
+    };
   }
 };
 

@@ -23,6 +23,12 @@ import {
   BackupFrequency,
   BackupData,
 } from '../../utils/backupRestore';
+import {
+  getStoredSupabaseConfig,
+  saveCustomSupabaseConfig,
+  getRequiredSupabaseSqlSchema,
+  testSupabaseConnection,
+} from '../../utils/supabaseMultiTenant';
 import { FabisLogo } from '../FabisLogo';
 import { 
   Settings, 
@@ -56,9 +62,14 @@ import {
   RefreshCw,
   Server,
   LayoutDashboard,
+  Copy,
+  ExternalLink,
+  Terminal,
+  Code2,
 } from 'lucide-react';
 import { PrintDesignerModule } from '../PrintDesigner/PrintDesignerModule';
 import { DashboardPersonalizationSection } from '../Settings/DashboardPersonalizationSection';
+import { SmsIntegrationSettings } from '../Settings/SmsIntegrationSettings';
 import {
   performSupabaseCloudBackup,
   restoreFromSupabaseCloud,
@@ -94,7 +105,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [brandingSavedSuccess, setBrandingSavedSuccess] = useState(false);
 
   // Data Protection & Backup State
-  const [activeSection, setActiveSection] = useState<'profile' | 'chairs' | 'dashboard' | 'print' | 'backup'>('profile');
+  const [activeSection, setActiveSection] = useState<'profile' | 'chairs' | 'dashboard' | 'print' | 'backup' | 'sms'>('profile');
 
   const [backupFreq, setBackupFreq] = useState<BackupFrequency>(getBackupReminderFrequency());
   const [lastBackup, setLastBackup] = useState<string | null>(getLastBackupTimestamp());
@@ -113,6 +124,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [editingChairName, setEditingChairName] = useState('');
   const [chairNotice, setChairNotice] = useState<string | null>(null);
 
+  // Supabase Custom Config State
+  const [supabaseConfig, setSupabaseConfig] = useState(getStoredSupabaseConfig());
+  const [supabaseUrlInput, setSupabaseUrlInput] = useState(supabaseConfig.url);
+  const [supabaseKeyInput, setSupabaseKeyInput] = useState(supabaseConfig.anonKey);
+  const [supabaseTestResult, setSupabaseTestResult] = useState<any>(null);
+  const [isTestingSupabase, setIsTestingSupabase] = useState(false);
+  const [showSqlSchemaModal, setShowSqlSchemaModal] = useState(false);
+  const [copiedSql, setCopiedSql] = useState(false);
+
   useEffect(() => {
     setCredentials(getStoredCredentials());
     setCurrentTheme(getStoredTheme());
@@ -121,6 +141,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setBackupFreq(getBackupReminderFrequency());
     setLastBackup(getLastBackupTimestamp());
     setLastCloudSync(getStoredCloudSyncTime());
+
+    const cfg = getStoredSupabaseConfig();
+    setSupabaseConfig(cfg);
+    setSupabaseUrlInput(cfg.url);
+    setSupabaseKeyInput(cfg.anonKey);
+    testSupabaseConnection().then(setSupabaseTestResult);
   }, []);
 
   const handleManualCloudBackup = async () => {
@@ -130,14 +156,40 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       const res = await performSupabaseCloudBackup(undefined, doctor);
       if (res.success) {
         setLastCloudSync(res.timestamp);
-        setBackupNotice('Clinic data backed up to Supabase Cloud successfully!');
-        setTimeout(() => setBackupNotice(null), 4000);
+        setBackupNotice(res.message || 'Clinic data backed up to Supabase Cloud successfully!');
+        setTimeout(() => setBackupNotice(null), 6000);
+        testSupabaseConnection().then(setSupabaseTestResult);
       }
     } catch (err: any) {
       setBackupNotice('Cloud backup error: ' + (err.message || 'Unknown error'));
     } finally {
       setIsCloudSyncing(false);
     }
+  };
+
+  const handleSaveSupabaseSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsTestingSupabase(true);
+    saveCustomSupabaseConfig(supabaseUrlInput, supabaseKeyInput);
+    const updated = getStoredSupabaseConfig();
+    setSupabaseConfig(updated);
+    const testRes = await testSupabaseConnection();
+    setSupabaseTestResult(testRes);
+    setIsTestingSupabase(false);
+  };
+
+  const handleTestSupabaseConn = async () => {
+    setIsTestingSupabase(true);
+    const testRes = await testSupabaseConnection();
+    setSupabaseTestResult(testRes);
+    setIsTestingSupabase(false);
+  };
+
+  const handleCopySqlSchema = () => {
+    const sql = getRequiredSupabaseSqlSchema();
+    navigator.clipboard.writeText(sql);
+    setCopiedSql(true);
+    setTimeout(() => setCopiedSql(false), 3000);
   };
 
   const handleRestoreFromCloud = async () => {
@@ -488,6 +540,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
         <button
           type="button"
+          onClick={() => setActiveSection('sms')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
+            activeSection === 'sms'
+              ? 'bg-emerald-600 text-white shadow-md'
+              : 'bg-theme-card text-theme-secondary hover:text-theme-main border border-theme-border'
+          }`}
+        >
+          <Key className="w-4 h-4 text-emerald-300" />
+          <span>SMS Gateway (TextBee)</span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveSection('backup')}
           className={`px-4 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
             activeSection === 'backup'
@@ -499,6 +564,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <span>Data Protection & Backups</span>
         </button>
       </div>
+
+      {/* SMS Settings Section */}
+      {activeSection === 'sms' && (
+        <SmsIntegrationSettings />
+      )}
 
       {/* Chair Settings View */}
       {activeSection === 'chairs' && (
@@ -1191,6 +1261,165 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="bg-rose-50 border border-rose-200 text-rose-800 p-3.5 rounded-2xl flex items-center gap-2 text-xs font-bold">
             <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
             <span>{restoreError}</span>
+          </div>
+        )}
+
+        {/* Supabase Database Connection & Auto-Provisioning Manager */}
+        <div className="p-5 bg-[#F8FAFC] border border-[#E8ECF3] rounded-2xl space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
+            <div>
+              <div className="flex items-center gap-2 font-bold text-sm text-slate-900">
+                <Database className="w-4 h-4 text-teal-600" />
+                <span>Supabase Cloud Integration & Table Provisioning</span>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Automated multi-tenant sync across <code className="font-mono bg-slate-200 px-1 py-0.5 rounded text-[10px]">clinic_backups</code>, <code className="font-mono bg-slate-200 px-1 py-0.5 rounded text-[10px]">patients</code>, <code className="font-mono bg-slate-200 px-1 py-0.5 rounded text-[10px]">chairs</code>, and <code className="font-mono bg-slate-200 px-1 py-0.5 rounded text-[10px]">sms_logs</code>.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleTestSupabaseConn}
+                disabled={isTestingSupabase}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-xs disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isTestingSupabase ? 'animate-spin' : ''}`} />
+                <span>Test Connection</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowSqlSchemaModal(true)}
+                className="px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+              >
+                <Code2 className="w-3.5 h-3.5" />
+                <span>View / Copy SQL Schema</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Table Readiness Badges */}
+          {supabaseTestResult && (
+            <div className="p-3 bg-white rounded-xl border border-slate-200 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-700">Endpoint: <span className="font-mono text-teal-700">{supabaseTestResult.url}</span></span>
+                <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold ${supabaseTestResult.connected ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                  {supabaseTestResult.connected ? 'Connected' : 'Connection Failed'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 border-t border-slate-100">
+                <div className="flex items-center gap-1.5 text-[11px] font-mono">
+                  {supabaseTestResult.tables?.clinic_backups ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" /> : <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
+                  <span className={supabaseTestResult.tables?.clinic_backups ? 'text-emerald-800 font-bold' : 'text-slate-600'}>clinic_backups</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px] font-mono">
+                  {supabaseTestResult.tables?.patients ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" /> : <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
+                  <span className={supabaseTestResult.tables?.patients ? 'text-emerald-800 font-bold' : 'text-slate-600'}>patients</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px] font-mono">
+                  {supabaseTestResult.tables?.chairs ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" /> : <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
+                  <span className={supabaseTestResult.tables?.chairs ? 'text-emerald-800 font-bold' : 'text-slate-600'}>chairs</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px] font-mono">
+                  {supabaseTestResult.tables?.sms_logs ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" /> : <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
+                  <span className={supabaseTestResult.tables?.sms_logs ? 'text-emerald-800 font-bold' : 'text-slate-600'}>sms_logs</span>
+                </div>
+              </div>
+
+              {supabaseTestResult.error && (
+                <p className="text-[11px] text-amber-800 bg-amber-50 p-2 rounded-lg font-mono">
+                  Notice: {supabaseTestResult.error}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Admin Custom Credentials Form */}
+          {activeRole === 'admin' && (
+            <form onSubmit={handleSaveSupabaseSettings} className="space-y-3 pt-2">
+              <span className="text-xs font-bold text-slate-800 block">Custom Supabase Project Credentials</span>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <input
+                  type="url"
+                  placeholder="https://your-project.supabase.co"
+                  value={supabaseUrlInput}
+                  onChange={(e) => setSupabaseUrlInput(e.target.value)}
+                  className="px-3.5 py-2 rounded-xl bg-white border border-slate-300 text-xs font-mono outline-none focus:border-teal-500"
+                />
+                <input
+                  type="password"
+                  placeholder="Anon / Public API Key"
+                  value={supabaseKeyInput}
+                  onChange={(e) => setSupabaseKeyInput(e.target.value)}
+                  className="px-3.5 py-2 rounded-xl bg-white border border-slate-300 text-xs font-mono outline-none focus:border-teal-500"
+                />
+              </div>
+              <div className="flex items-center justify-end">
+                <button
+                  type="submit"
+                  disabled={isTestingSupabase}
+                  className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl transition-all cursor-pointer shadow-xs disabled:opacity-50"
+                >
+                  Save Credentials & Reconnect
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+
+        {/* SQL Schema Modal */}
+        {showSqlSchemaModal && (
+          <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-fadeIn">
+            <div className="bg-white rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] flex flex-col">
+              <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+                <div className="flex items-center gap-2 text-teal-700 font-bold text-base">
+                  <Terminal className="w-5 h-5 text-teal-600" />
+                  <span>Supabase SQL Provisioning Schema</span>
+                </div>
+                <button
+                  onClick={() => setShowSqlSchemaModal(false)}
+                  className="p-1.5 rounded-full hover:bg-slate-100 text-slate-500 font-bold cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-600 font-medium">
+                If you are connecting a brand new Supabase instance, copy this SQL script and execute it in your Supabase Project's <strong>SQL Editor</strong> tab to initialize all required tables automatically:
+              </p>
+
+              <div className="relative flex-1 bg-slate-950 text-emerald-400 p-4 rounded-2xl font-mono text-[11px] overflow-auto max-h-72 border border-slate-800">
+                <pre>{getRequiredSupabaseSqlSchema()}</pre>
+              </div>
+
+              <div className="flex items-center justify-between pt-2 border-t border-slate-200">
+                {copiedSql ? (
+                  <span className="text-xs font-bold text-emerald-700 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" /> SQL Schema Copied to Clipboard!
+                  </span>
+                ) : (
+                  <span className="text-xs text-slate-400">Creates clinic_backups, patients, chairs, sms_logs</span>
+                )}
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleCopySqlSchema}
+                    className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-bold text-xs flex items-center gap-2 shadow-xs transition-all cursor-pointer"
+                  >
+                    <Copy className="w-4 h-4" />
+                    <span>Copy SQL Schema</span>
+                  </button>
+                  <button
+                    onClick={() => setShowSqlSchemaModal(false)}
+                    className="px-4 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl font-bold text-xs transition-all cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 

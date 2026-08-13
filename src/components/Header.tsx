@@ -32,6 +32,7 @@ interface HeaderProps {
   onResetDemoData: () => void;
   onLogout: () => void;
   onSwitchRole?: () => void;
+  onOpenNotificationCenter?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -53,6 +54,7 @@ export const Header: React.FC<HeaderProps> = ({
   onResetDemoData,
   onLogout,
   onSwitchRole,
+  onOpenNotificationCenter,
 }) => {
   const [showSearchResults, setShowSearchResults] = React.useState(false);
 
@@ -184,8 +186,9 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Notifications Bell */}
           <div className="relative">
             <button
-              title="Notifications & Alerts"
-              className="w-9 h-9 rounded-xl bg-theme-card border border-theme-border flex items-center justify-center text-theme-secondary hover:text-theme-main transition-all cursor-pointer relative shadow-2xs"
+              onClick={() => onOpenNotificationCenter?.()}
+              title="Notifications & Alerts Center"
+              className="w-9 h-9 rounded-xl bg-theme-card border border-theme-border flex items-center justify-center text-theme-secondary hover:text-theme-main transition-all cursor-pointer relative shadow-2xs hover:border-theme-accent"
             >
               <Bell className="w-4 h-4 text-theme-main" />
               {notificationCount > 0 && (

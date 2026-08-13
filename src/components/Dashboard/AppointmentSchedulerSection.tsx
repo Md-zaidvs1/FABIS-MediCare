@@ -31,7 +31,7 @@ import {
 interface AppointmentSchedulerSectionProps {
   patients: Patient[];
   activeRole?: UserRole;
-  onSelectPatient: (patientId: string) => void;
+  onSelectPatient: (patientId: string, initialTab?: 'overview' | 'teethMap' | 'treatments' | 'prescriptions' | 'invoices') => void;
   onOpenBookAppointment: (defaultDate?: string, patientId?: string) => void;
   onOpenAddPatient?: () => void;
   onOpenCreateInvoice?: (patientId?: string) => void;
@@ -372,6 +372,7 @@ export const AppointmentSchedulerSection: React.FC<AppointmentSchedulerSectionPr
       onUpdateAppointmentStatus(apt.id, 'Arrived');
     } else if (cat === 'Waiting' || cat === 'Overdue') {
       onUpdateAppointmentStatus(apt.id, 'In-Chair');
+      onSelectPatient(apt.patientId, 'teethMap');
     } else if (cat === 'In Treatment') {
       onUpdateAppointmentStatus(apt.id, 'Completed');
     }

@@ -184,6 +184,9 @@ export interface Appointment {
   recallDueDate?: string;
   recallType?: '6-Month Routine Checkup' | 'Post-Op Follow-Up' | 'Scaling Recall' | 'Orthodontic Adjustment';
   recallStatus?: 'Pending' | 'Reminded' | 'Confirmed' | 'Completed';
+  smsReminderEnabled?: boolean;
+  smsReminderTiming?: '1 day before' | '2 days before' | 'Same day' | 'Custom';
+  smsStatus?: 'Pending' | 'Sent' | 'Failed';
 }
 
 export interface FollowUpTask {
@@ -195,6 +198,10 @@ export interface FollowUpTask {
   reason: string; // e.g. "Post-RCT Crown Impression Check", "Suture Removal"
   status: 'Pending' | 'Call Placed' | 'Confirmed' | 'Completed';
   notes?: string;
+  smsEnabled?: boolean;
+  smsStatus?: 'Pending' | 'Sent' | 'Failed' | 'Gateway Unavailable';
+  scheduledSmsDate?: string;
+  customSmsMessage?: string;
 }
 
 export interface ClinicalMedia {
@@ -261,6 +268,47 @@ export interface Patient {
   media: ClinicalMedia[];
   visitHistory?: VisitRecord[];
   notes?: string;
+  smsConsent?: boolean; // Default true unless disabled by patient request
+}
+
+export interface SmsPublicSettings {
+  deviceId: string;
+  hasApiKey: boolean;
+  maskedApiKey: string;
+  connected: boolean;
+  deviceName: string;
+  lastCheckedAt?: string;
+  clinicName: string;
+  clinicPhone: string;
+  doctorName: string;
+  defaultReminderTiming: '1 day before' | '2 days before' | 'Same day' | 'Custom';
+  smsEnabled: boolean;
+  dailyLimit: number;
+  monthlyLimit: number;
+}
+
+export interface SmsLogRecord {
+  id: string;
+  patientId: string;
+  patientName: string;
+  appointmentId?: string;
+  followupId?: string;
+  recipient: string;
+  message: string;
+  type: 'Appointment' | 'Follow-up' | 'Manual' | 'Test' | 'Recall';
+  status: 'Pending' | 'Sending' | 'Sent' | 'Failed';
+  textbeeMessageId?: string;
+  error?: string;
+  sentAt?: string;
+  createdAt: string;
+}
+
+export interface SmsTemplateRecord {
+  id: string;
+  title: string;
+  category: 'Appointment Reminder' | 'Follow-up Reminder' | 'Treatment Follow-up' | 'Dental Recall' | 'Missed Appointment' | 'Custom Message';
+  body: string;
+  isDefault?: boolean;
 }
 
 export type UserRole = 'admin' | 'doctor';

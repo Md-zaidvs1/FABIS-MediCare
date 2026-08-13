@@ -39,6 +39,7 @@ import {
   formatCurrentTimestamp,
   CustomTreatmentItem 
 } from '../../utils/storage';
+import { SendSmsModal } from '../Modals/SendSmsModal';
 import { 
   User, 
   Activity, 
@@ -68,12 +69,15 @@ import {
   Tag,
   Check,
   Search,
-  Trash2
+  Trash2,
+  Send,
+  MessageSquare
 } from 'lucide-react';
 
 interface PatientEMRWorkspaceProps {
   patient: Patient;
   doctor?: DoctorProfile;
+  initialTab?: 'overview' | 'teethMap' | 'perio' | 'treatments' | 'prescriptions' | 'invoices' | 'timeline' | 'media';
   onBackToDirectory: () => void;
   onUpdatePatientTeeth: (patientId: string, toothNumber: number, condition: ToothCondition, notes?: string, diagnoses?: string[]) => void;
   onAddTreatmentPlan: (patientId: string, plan: Omit<TreatmentPlanItem, 'id' | 'patientId'>) => void;
@@ -94,6 +98,7 @@ interface PatientEMRWorkspaceProps {
 export const PatientEMRWorkspace: React.FC<PatientEMRWorkspaceProps> = ({
   patient,
   doctor,
+  initialTab = 'overview',
   onBackToDirectory,
   onUpdatePatientTeeth,
   onAddTreatmentPlan,
@@ -110,7 +115,13 @@ export const PatientEMRWorkspace: React.FC<PatientEMRWorkspaceProps> = ({
   onUpdateFollowUpStatus,
   onRescheduleFollowUp,
 }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'teethMap' | 'perio' | 'treatments' | 'prescriptions' | 'invoices' | 'timeline' | 'media'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'teethMap' | 'perio' | 'treatments' | 'prescriptions' | 'invoices' | 'timeline' | 'media'>(initialTab);
+
+  React.useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab, patient.id]);
 
   // Teeth Map Selection State
   const [selectedToothNum, setSelectedToothNum] = useState<number>(30);
@@ -174,6 +185,10 @@ export const PatientEMRWorkspace: React.FC<PatientEMRWorkspaceProps> = ({
 
   // Media Lightbox State
   const [activeMediaUrl, setActiveMediaUrl] = useState<string | null>(null);
+
+  // SMS Modal & Consent State
+  const [isSendSmsOpen, setIsSendSmsOpen] = useState(false);
+  const [patientSmsConsent, setPatientSmsConsent] = useState<boolean>(patient.smsConsent !== false);
 
   const selectedToothRecord: ToothRecord = patient.teethMap[selectedToothNum] || {
     toothNumber: selectedToothNum,
@@ -613,10 +628,32 @@ export const PatientEMRWorkspace: React.FC<PatientEMRWorkspaceProps> = ({
           </div>
 
           {/* Quick Action Group for active patient */}
-          <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+          <div className="flex items-center gap-2 w-full sm:w-auto justify-end flex-wrap">
+            <button
+              type="button"
+              onClick={() => setPatientSmsConsent(!patientSmsConsent)}
+              className={`px-3 py-2 rounded-xl text-[11px] font-extrabold flex items-center gap-1.5 border transition-all cursor-pointer ${
+                patientSmsConsent
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                  : 'bg-zinc-100 text-zinc-500 border-zinc-300'
+              }`}
+              title={patientSmsConsent ? 'Patient has consented to SMS' : 'Patient opted out of SMS'}
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span>{patientSmsConsent ? 'SMS: Consent Active' : 'SMS: Opted Out'}</span>
+            </button>
+
+            <button
+              onClick={() => setIsSendSmsOpen(true)}
+              className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <Send className="w-3.5 h-3.5" />
+              <span>Send SMS</span>
+            </button>
+
             <button
               onClick={() => onOpenBookAppointment(undefined, patient.id)}
-              className="px-3.5 py-2 rounded-xl bg-[#18181b] hover:bg-zinc-800 text-white font-bold text-xs shadow transition-all"
+              className="px-3.5 py-2 rounded-xl bg-[#18181b] hover:bg-zinc-800 text-white font-bold text-xs shadow transition-all cursor-pointer"
             >
               + Book Visit
             </button>
@@ -2209,6 +2246,15 @@ export const PatientEMRWorkspace: React.FC<PatientEMRWorkspaceProps> = ({
           </div>
         </div>
       )}
+
+      {/* Direct SMS Modal for Patient */}
+      <SendSmsModal
+        isOpen={isSendSmsOpen}
+        onClose={() => setIsSendSmsOpen(false)}
+        patientId={patient.id}
+        patientName={patient.name}
+        patientPhone={patient.phone}
+      />
     </div>
   );
 };

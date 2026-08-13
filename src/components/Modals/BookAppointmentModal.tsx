@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Patient, Appointment, ChairStatus } from '../../types';
 import { formatTodayISO } from '../../utils/formatters';
 import { getStoredChairs } from '../../utils/storage';
+import { scheduleSmsReminderApi } from '../../utils/smsApi';
 import {
   CalendarPlus,
   X,
@@ -162,6 +163,7 @@ export const BookAppointmentModal: React.FC<BookAppointmentModalProps> = ({
   const [doctorName, setDoctorName] = useState('Dr. Fabis (BDS, MDS)');
   const [status, setStatus] = useState<Appointment['status']>('Scheduled');
   const [notes, setNotes] = useState('');
+  const [sendSmsReminder, setSendSmsReminder] = useState(true);
 
   // Sync default props when modal opens
   useEffect(() => {
@@ -231,6 +233,8 @@ export const BookAppointmentModal: React.FC<BookAppointmentModalProps> = ({
     e.preventDefault();
     if (!selectedPatient) return;
 
+    const newAptId = `APT-${Date.now()}`;
+
     onBookAppointment({
       patientId: selectedPatient.id,
       patientName: selectedPatient.name,
@@ -243,6 +247,19 @@ export const BookAppointmentModal: React.FC<BookAppointmentModalProps> = ({
       status,
       notes,
     });
+
+    if (sendSmsReminder) {
+      scheduleSmsReminderApi({
+        appointmentId: newAptId,
+        patientId: selectedPatient.id,
+        patientName: selectedPatient.name,
+        patientPhone: selectedPatient.phone,
+        appointmentDate: date,
+        appointmentTime: timeSlot,
+        procedure,
+        chair,
+      }).catch((err) => console.error('Failed to queue automated SMS reminder:', err));
+    }
 
     onClose();
   };
@@ -679,6 +696,30 @@ export const BookAppointmentModal: React.FC<BookAppointmentModalProps> = ({
                 onChange={(e) => setNotes(e.target.value)}
                 className="w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl text-slate-900 dark:text-white focus:border-[#3BA7F5] outline-none text-xs"
               />
+            </div>
+
+            {/* 8. AUTOMATED SMS REMINDER */}
+            <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-2xl flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <input
+                  type="checkbox"
+                  id="sendSmsReminder"
+                  checked={sendSmsReminder}
+                  onChange={(e) => setSendSmsReminder(e.target.checked)}
+                  className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
+                />
+                <label htmlFor="sendSmsReminder" className="cursor-pointer">
+                  <span className="font-extrabold text-xs text-emerald-900 dark:text-emerald-200 block">
+                    Queue Automated TextBee SMS Reminder
+                  </span>
+                  <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-medium block">
+                    Automatically sends 24h & 2h before visit to {selectedPatient?.phone || 'patient'}
+                  </span>
+                </label>
+              </div>
+              <span className="text-[10px] font-mono font-bold px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-200 rounded-full shrink-0">
+                TextBee Gateway
+              </span>
             </div>
           </div>
 

@@ -55,7 +55,7 @@ const WELCOME_CARD_ICONS: Record<string, React.FC<{ className?: string }>> = {
 interface DashboardProps {
   patients: Patient[];
   activeRole?: UserRole;
-  onSelectPatient: (patientId: string) => void;
+  onSelectPatient: (patientId: string, initialTab?: 'overview' | 'teethMap' | 'treatments' | 'prescriptions' | 'invoices') => void;
   onOpenAddPatient: () => void;
   onOpenBookAppointment: (defaultDate?: string, patientId?: string) => void;
   onOpenCreateInvoice: (patientId?: string) => void;

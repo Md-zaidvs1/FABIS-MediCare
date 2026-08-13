@@ -6,6 +6,7 @@ import {
   Receipt, 
   FileSpreadsheet, 
   Settings,
+  MessageSquare,
   ChevronRight,
   ChevronLeft,
   PanelLeftClose,
@@ -20,7 +21,8 @@ export type NavigationTab =
   | 'appointments' 
   | 'billing' 
   | 'prescriptions' 
-  | 'settings';
+  | 'settings'
+  | 'sms';
 
 interface SidebarNavProps {
   activeTab: NavigationTab;
@@ -94,6 +96,11 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
       id: 'prescriptions',
       label: 'Prescriptions',
       icon: FileSpreadsheet,
+    },
+    {
+      id: 'sms',
+      label: 'SMS Center',
+      icon: MessageSquare,
     },
     {
       id: 'settings',
