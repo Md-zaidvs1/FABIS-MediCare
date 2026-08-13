@@ -126,11 +126,14 @@ const DEFAULT_TEMPLATES: SmsTemplate[] = [
   },
 ];
 
+const getEnvDeviceId = () => process.env.TEXTBEE_DEVICE_ID || process.env.VITE_TEXTBEE_DEVICE_ID || '';
+const getEnvApiKey = () => process.env.TEXTBEE_API_KEY || process.env.VITE_TEXTBEE_API_KEY || '';
+
 const DEFAULT_SETTINGS: SmsSettings = {
-  deviceId: '',
-  apiKey: '',
-  connected: false,
-  deviceName: '',
+  deviceId: getEnvDeviceId(),
+  apiKey: getEnvApiKey(),
+  connected: Boolean(getEnvDeviceId() && getEnvApiKey()),
+  deviceName: getEnvDeviceId() && getEnvApiKey() ? 'TextBee Android Gateway (Env Configured)' : '',
   clinicName: 'RK Dental Clinic',
   clinicPhone: '+91 9876543210',
   doctorName: 'Dr. Alex Mercer',
@@ -173,8 +176,21 @@ class SmsStore {
       if (fs.existsSync(STORE_FILE)) {
         const fileContent = fs.readFileSync(STORE_FILE, 'utf-8');
         const parsed = JSON.parse(fileContent);
+        const loadedSettings = parsed.settings || {};
+
+        const deviceId = loadedSettings.deviceId || getEnvDeviceId();
+        const apiKey = loadedSettings.apiKey || getEnvApiKey();
+        const connected = loadedSettings.connected !== undefined ? loadedSettings.connected : Boolean(deviceId && apiKey);
+
         this.data = {
-          settings: { ...DEFAULT_SETTINGS, ...(parsed.settings || {}) },
+          settings: {
+            ...DEFAULT_SETTINGS,
+            ...loadedSettings,
+            deviceId,
+            apiKey,
+            connected,
+            deviceName: loadedSettings.deviceName || (deviceId && apiKey ? 'TextBee Android Gateway' : ''),
+          },
           logs: parsed.logs || [],
           templates: parsed.templates && parsed.templates.length > 0 ? parsed.templates : [...DEFAULT_TEMPLATES],
           followups: parsed.followups || [],

@@ -21,6 +21,7 @@ const STORAGE_KEYS = {
   CUSTOM_APP_ICON: 'customAppIcon',
   CHAIRS: 'fabis_medicare_chairs_v1',
   DASHBOARD_SETTINGS: 'fabis_medicare_dashboard_settings_v1',
+  SMS_SETTINGS: 'fabis_medicare_sms_gateway_v1',
 };
 
 export const DEFAULT_DASHBOARD_SETTINGS: DashboardPersonalizationSettings = {
@@ -581,5 +582,47 @@ export const saveStoredChairs = (chairs: ChairStatus[]): void => {
     window.dispatchEvent(new Event('fabis_chairs_updated'));
   } catch (err) {
     console.error('Error saving chairs storage', err);
+  }
+};
+
+export interface StoredSmsGatewaySettings {
+  deviceId: string;
+  apiKey: string;
+  clinicName?: string;
+  clinicPhone?: string;
+  doctorName?: string;
+  defaultReminderTiming?: '1 day before' | '2 days before' | 'Same day' | 'Custom';
+  connected?: boolean;
+  updatedAt?: string;
+}
+
+export const getStoredSmsGatewaySettings = (): StoredSmsGatewaySettings | null => {
+  try {
+    const data = localStorage.getItem(STORAGE_KEYS.SMS_SETTINGS);
+    if (data) {
+      const parsed = JSON.parse(data);
+      if (parsed && typeof parsed === 'object') {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.error('Error reading SMS gateway settings from storage', err);
+  }
+  return null;
+};
+
+export const saveStoredSmsGatewaySettings = (settings: StoredSmsGatewaySettings | null): void => {
+  try {
+    if (settings) {
+      localStorage.setItem(
+        STORAGE_KEYS.SMS_SETTINGS,
+        JSON.stringify({ ...settings, updatedAt: new Date().toISOString() })
+      );
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.SMS_SETTINGS);
+    }
+    window.dispatchEvent(new Event('fabis_sms_settings_updated'));
+  } catch (err) {
+    console.error('Error saving SMS gateway settings to storage', err);
   }
 };

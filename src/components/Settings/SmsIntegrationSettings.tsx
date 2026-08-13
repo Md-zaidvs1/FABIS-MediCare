@@ -13,8 +13,10 @@ import {
   HelpCircle,
   Sparkles,
 } from 'lucide-react';
-import { connectSmsGateway, disconnectSmsGateway, getSmsStatus, sendTestSms } from '../../utils/smsApi';
+import { connectSmsGateway, disconnectSmsGateway, getSmsStatus, sendTestSms, autoRestoreSmsSettingsIfNeeded } from '../../utils/smsApi';
 import { SmsPublicSettings } from '../../types';
+import { getStoredSmsGatewaySettings } from '../../utils/storage';
+import { performSupabaseCloudBackup } from '../../utils/supabaseCloudBackup';
 
 export const SmsIntegrationSettings: React.FC = () => {
   const [deviceId, setDeviceId] = useState('');
@@ -41,14 +43,23 @@ export const SmsIntegrationSettings: React.FC = () => {
   const fetchStatus = async () => {
     setIsLoadingStatus(true);
     try {
+      await autoRestoreSmsSettingsIfNeeded();
       const data = await getSmsStatus();
+      const stored = getStoredSmsGatewaySettings();
+
       if (data.settings) {
         setSettings(data.settings);
-        setDeviceId(data.settings.deviceId || '');
-        setClinicName(data.settings.clinicName || 'RK Dental Clinic');
-        setClinicPhone(data.settings.clinicPhone || '+91 9876543210');
-        setDoctorName(data.settings.doctorName || 'Dr. Fabis (BDS, MDS)');
-        setDefaultReminderTiming(data.settings.defaultReminderTiming || '1 day before');
+        setDeviceId(data.settings.deviceId || stored?.deviceId || '');
+        setClinicName(data.settings.clinicName || stored?.clinicName || 'RK Dental Clinic');
+        setClinicPhone(data.settings.clinicPhone || stored?.clinicPhone || '+91 9876543210');
+        setDoctorName(data.settings.doctorName || stored?.doctorName || 'Dr. Fabis (BDS, MDS)');
+        setDefaultReminderTiming(data.settings.defaultReminderTiming || stored?.defaultReminderTiming || '1 day before');
+      } else if (stored) {
+        setDeviceId(stored.deviceId || '');
+        setClinicName(stored.clinicName || 'RK Dental Clinic');
+        setClinicPhone(stored.clinicPhone || '+91 9876543210');
+        setDoctorName(stored.doctorName || 'Dr. Fabis (BDS, MDS)');
+        setDefaultReminderTiming(stored.defaultReminderTiming || '1 day before');
       }
       if (data.health) {
         setHealthStatus(data.health);
@@ -69,10 +80,12 @@ export const SmsIntegrationSettings: React.FC = () => {
 
   const handleConnect = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!deviceId.trim() || !apiKey.trim()) {
+    if (!deviceId.trim() || (!apiKey.trim() && !getStoredSmsGatewaySettings()?.apiKey)) {
       setBanner({ type: 'error', message: 'Please provide both Device ID and API Key from your TextBee app.' });
       return;
     }
+
+    const effectiveApiKey = apiKey.trim() || getStoredSmsGatewaySettings()?.apiKey || '';
 
     setIsConnecting(true);
     setBanner(null);
@@ -80,16 +93,22 @@ export const SmsIntegrationSettings: React.FC = () => {
     try {
       const res = await connectSmsGateway({
         deviceId: deviceId.trim(),
-        apiKey: apiKey.trim(),
+        apiKey: effectiveApiKey,
         clinicName,
         clinicPhone,
         doctorName,
         defaultReminderTiming,
       });
 
-      setBanner({ type: 'success', message: res.message || 'TextBee Android Gateway connected successfully!' });
+      setBanner({ type: 'success', message: res.message || 'TextBee Android Gateway connected successfully & credentials saved permanently!' });
       setSettings(res.settings);
       setApiKey(''); // clear plain API key input for security
+      
+      // Auto-sync credentials & settings to Supabase Cloud Database Backup
+      performSupabaseCloudBackup().catch((err) =>
+        console.warn('[Supabase Cloud Backup] SMS settings auto-backup notice:', err)
+      );
+
       fetchStatus();
     } catch (err: any) {
       setBanner({ type: 'error', message: err.message || 'Failed to connect TextBee gateway' });

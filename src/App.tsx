@@ -26,6 +26,7 @@ import {
 } from './utils/storage';
 import { formatTodayISO, universalToFDI, getToothName } from './utils/formatters';
 import { useOfflineSync } from './hooks/useOfflineSync';
+import { autoRestoreSmsSettingsIfNeeded } from './utils/smsApi';
 
 // Layout Components
 import { Header } from './components/Header';
@@ -87,9 +88,12 @@ export default function App() {
   const [viewingInvoice, setViewingInvoice] = useState<Invoice | null>(null);
   const [viewingPrescription, setViewingPrescription] = useState<Prescription | null>(null);
 
-  // Apply saved theme on initial load
+  // Apply saved theme and auto-restore SMS gateway credentials on initial load
   useEffect(() => {
     applyThemeToDocument(getStoredTheme());
+    autoRestoreSmsSettingsIfNeeded().catch((err) =>
+      console.warn('[SMS Boot Auto-Sync] Notice:', err)
+    );
   }, []);
 
   // Sync patients changes to localStorage and IndexedDB (Dual Save)

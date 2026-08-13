@@ -1,6 +1,6 @@
 {
-  "name": "Remix FABIS MEDICARE-1.",
-  "description": "Dental EMR & Clinic Management System for RK Dental Clinic featuring TextBee SMS integration, automated appointment reminders, patient follow-up tracking, teeth mapping, treatment plans, prescriptions, and invoicing.",
+  "name": "Remix Remix FABIS MEDICARE-1.3",
+  "description": "Single-Doctor Dental EMR \u0026 Clinic Management System for Dr. Alex Mercer featuring patient charts, teeth mapping, treatment plans, prescriptions, invoicing, and appointments.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

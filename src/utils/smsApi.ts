@@ -1,4 +1,5 @@
 import { Patient, SmsPublicSettings, SmsLogRecord, SmsTemplateRecord } from '../types';
+import { getStoredSmsGatewaySettings, saveStoredSmsGatewaySettings } from './storage';
 
 export interface SmsDashboardData {
   gateway: SmsPublicSettings;
@@ -31,6 +32,18 @@ export async function connectSmsGateway(params: {
   if (!res.ok) {
     throw new Error(data.error || 'Failed to connect SMS gateway');
   }
+
+  // Persist locally for instant client restore across redeployments
+  saveStoredSmsGatewaySettings({
+    deviceId: params.deviceId,
+    apiKey: params.apiKey,
+    clinicName: params.clinicName,
+    clinicPhone: params.clinicPhone,
+    doctorName: params.doctorName,
+    defaultReminderTiming: params.defaultReminderTiming as any,
+    connected: true,
+  });
+
   return data;
 }
 
@@ -42,7 +55,34 @@ export async function disconnectSmsGateway() {
   if (!res.ok) {
     throw new Error(data.error || 'Failed to disconnect gateway');
   }
+
+  saveStoredSmsGatewaySettings(null);
   return data;
+}
+
+export async function autoRestoreSmsSettingsIfNeeded() {
+  try {
+    const statusData = await getSmsStatus();
+    if (!statusData?.settings?.connected || !statusData?.settings?.deviceId) {
+      const stored = getStoredSmsGatewaySettings();
+      if (stored && stored.deviceId && stored.apiKey) {
+        console.log('[SMS Gateway] Restoring saved gateway credentials to server...');
+        const res = await connectSmsGateway({
+          deviceId: stored.deviceId,
+          apiKey: stored.apiKey,
+          clinicName: stored.clinicName,
+          clinicPhone: stored.clinicPhone,
+          doctorName: stored.doctorName,
+          defaultReminderTiming: stored.defaultReminderTiming,
+        });
+        return res;
+      }
+    }
+    return statusData;
+  } catch (err) {
+    console.warn('[SMS Gateway] Notice during auto-restore:', err);
+    return null;
+  }
 }
 
 export async function getSmsStatus() {

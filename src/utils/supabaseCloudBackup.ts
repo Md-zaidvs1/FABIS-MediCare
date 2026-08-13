@@ -36,7 +36,11 @@ import {
   saveDeletedPredefinedTreatments,
   getStoredDeletedPredefinedMedicines,
   saveDeletedPredefinedMedicines,
+  getStoredSmsGatewaySettings,
+  saveStoredSmsGatewaySettings,
+  StoredSmsGatewaySettings,
 } from './storage';
+import { connectSmsGateway } from './smsApi';
 import { dualSaveSnapshot } from './indexedDBStorage';
 
 const supabaseClient = multiTenantSupabaseClient;
@@ -58,6 +62,7 @@ export interface CloudBackupPayload {
   clinicLogo: string | null;
   appIcon: string | null;
   theme: string;
+  smsSettings?: StoredSmsGatewaySettings | null;
 }
 
 const CLOUD_KEYS = {
@@ -186,6 +191,7 @@ export const performSupabaseCloudBackup = async (
       clinicLogo: getStoredCustomClinicLogo(),
       appIcon: getStoredCustomAppIcon(),
       theme: getStoredTheme(),
+      smsSettings: getStoredSmsGatewaySettings(),
     };
 
     const payloadString = JSON.stringify(payload);
@@ -330,6 +336,20 @@ export const restoreFromSupabaseCloud = async (): Promise<{
     if (cloudData.clinicLogo !== undefined) saveCustomClinicLogo(cloudData.clinicLogo);
     if (cloudData.appIcon !== undefined) saveCustomAppIcon(cloudData.appIcon);
     if (cloudData.theme) saveStoredTheme(cloudData.theme as any);
+
+    if (cloudData.smsSettings) {
+      saveStoredSmsGatewaySettings(cloudData.smsSettings);
+      if (cloudData.smsSettings.deviceId && cloudData.smsSettings.apiKey) {
+        connectSmsGateway({
+          deviceId: cloudData.smsSettings.deviceId,
+          apiKey: cloudData.smsSettings.apiKey,
+          clinicName: cloudData.smsSettings.clinicName,
+          clinicPhone: cloudData.smsSettings.clinicPhone,
+          doctorName: cloudData.smsSettings.doctorName,
+          defaultReminderTiming: cloudData.smsSettings.defaultReminderTiming,
+        }).catch((err) => console.warn('Auto connect restored SMS settings error:', err));
+      }
+    }
 
     window.dispatchEvent(new Event('custom-branding-updated'));
 
