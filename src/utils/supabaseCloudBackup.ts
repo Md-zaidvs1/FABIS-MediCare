@@ -38,6 +38,12 @@ import {
   saveDeletedPredefinedMedicines,
   getStoredSmsGatewaySettings,
   saveStoredSmsGatewaySettings,
+  getStoredSmsLogs,
+  saveStoredSmsLogs,
+  getStoredSmsTemplates,
+  saveStoredSmsTemplates,
+  getStoredSmsFollowups,
+  saveStoredSmsFollowups,
   StoredSmsGatewaySettings,
 } from './storage';
 import { connectSmsGateway } from './smsApi';
@@ -63,6 +69,9 @@ export interface CloudBackupPayload {
   appIcon: string | null;
   theme: string;
   smsSettings?: StoredSmsGatewaySettings | null;
+  smsLogs?: any[];
+  smsTemplates?: any[];
+  smsFollowups?: any[];
 }
 
 const CLOUD_KEYS = {
@@ -192,6 +201,9 @@ export const performSupabaseCloudBackup = async (
       appIcon: getStoredCustomAppIcon(),
       theme: getStoredTheme(),
       smsSettings: getStoredSmsGatewaySettings(),
+      smsLogs: getStoredSmsLogs(),
+      smsTemplates: getStoredSmsTemplates(),
+      smsFollowups: getStoredSmsFollowups(),
     };
 
     const payloadString = JSON.stringify(payload);
@@ -336,6 +348,10 @@ export const restoreFromSupabaseCloud = async (): Promise<{
     if (cloudData.clinicLogo !== undefined) saveCustomClinicLogo(cloudData.clinicLogo);
     if (cloudData.appIcon !== undefined) saveCustomAppIcon(cloudData.appIcon);
     if (cloudData.theme) saveStoredTheme(cloudData.theme as any);
+
+    if (Array.isArray(cloudData.smsLogs)) saveStoredSmsLogs(cloudData.smsLogs);
+    if (Array.isArray(cloudData.smsTemplates)) saveStoredSmsTemplates(cloudData.smsTemplates);
+    if (Array.isArray(cloudData.smsFollowups)) saveStoredSmsFollowups(cloudData.smsFollowups);
 
     if (cloudData.smsSettings) {
       saveStoredSmsGatewaySettings(cloudData.smsSettings);

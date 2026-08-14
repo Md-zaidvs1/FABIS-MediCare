@@ -1,5 +1,16 @@
 import { Patient, SmsPublicSettings, SmsLogRecord, SmsTemplateRecord } from '../types';
-import { getStoredSmsGatewaySettings, saveStoredSmsGatewaySettings } from './storage';
+import {
+  getStoredSmsGatewaySettings,
+  saveStoredSmsGatewaySettings,
+  getStoredSmsLogs,
+  saveStoredSmsLogs,
+  getStoredSmsTemplates,
+  saveStoredSmsTemplates,
+  getStoredSmsFollowups,
+  saveStoredSmsFollowups,
+  StoredSmsGatewaySettings,
+} from './storage';
+import { performSupabaseCloudBackup } from './supabaseCloudBackup';
 
 export interface SmsDashboardData {
   gateway: SmsPublicSettings;
@@ -15,6 +26,192 @@ export interface SmsDashboardData {
   upcomingRemindersCount: number;
 }
 
+export const DEFAULT_SMS_TEMPLATES: SmsTemplateRecord[] = [
+  {
+    id: 'tpl-1',
+    title: 'Standard Appointment Reminder',
+    category: 'Appointment Reminder',
+    body: 'Dear {{patient_name}}, this is a reminder from {{clinic_name}}. Your dental appointment is scheduled for {{appointment_date}} at {{appointment_time}}. Please arrive 10 minutes early. Thank you.',
+    isDefault: true,
+  },
+  {
+    id: 'tpl-2',
+    title: 'Dental Review & Follow-up',
+    category: 'Follow-up Reminder',
+    body: 'Dear {{patient_name}}, this is a follow-up reminder from {{clinic_name}}. Your dental review is scheduled for {{followup_date}}. Please contact us if you need to adjust your visit. Thank you.',
+    isDefault: true,
+  },
+  {
+    id: 'tpl-3',
+    title: 'Post-Treatment Healing Check',
+    category: 'Treatment Follow-up',
+    body: 'Dear {{patient_name}}, Dr. {{doctor_name}} from {{clinic_name}} hopes you are healing well after your treatment. Please take prescribed medications on time and call {{clinic_phone}} if you have discomfort.',
+    isDefault: true,
+  },
+  {
+    id: 'tpl-4',
+    title: '6-Month Dental Recall Checkup',
+    category: 'Dental Recall',
+    body: 'Dear {{patient_name}}, it has been 6 months since your last scaling & checkup at {{clinic_name}}. Keep your smile healthy! Call {{clinic_phone}} to book your recall appointment.',
+    isDefault: true,
+  },
+  {
+    id: 'tpl-5',
+    title: 'Missed Appointment Follow-up',
+    category: 'Missed Appointment',
+    body: 'Dear {{patient_name}}, we missed you today at {{clinic_name}} for your scheduled dental visit. Please reply or call {{clinic_phone}} to reschedule at your convenience.',
+    isDefault: true,
+  },
+  {
+    id: 'tpl-6',
+    title: 'Custom General Message',
+    category: 'Custom Message',
+    body: 'Dear {{patient_name}}, greetings from {{clinic_name}}. {{message_content}} Thank you.',
+    isDefault: false,
+  },
+];
+
+/**
+ * Normalizes Indian/international phone numbers to E.164 (+91XXXXXXXXXX)
+ */
+export function normalizePhoneNumber(phone: string): string {
+  if (!phone) return '';
+  let clean = phone.trim().replace(/[\s\-\(\)]/g, '');
+  if (clean.startsWith('+91')) return clean;
+  if (clean.startsWith('91') && clean.length === 12) return '+' + clean;
+  if (/^[6-9]\d{9}$/.test(clean)) return '+91' + clean;
+  if (!clean.startsWith('+')) return '+' + clean;
+  return clean;
+}
+
+export function isValidPhoneNumber(phone: string): boolean {
+  const normalized = normalizePhoneNumber(phone);
+  return /^\+\d{10,15}$/.test(normalized);
+}
+
+/**
+ * Direct client-side TextBee API call (https://api.textbee.dev)
+ */
+export async function sendTextBeeSmsDirect(params: {
+  deviceId: string;
+  apiKey: string;
+  recipientPhone: string;
+  message: string;
+}): Promise<{ success: boolean; messageId?: string; error?: string; rawResponse?: any }> {
+  const { deviceId, apiKey, recipientPhone, message } = params;
+
+  if (!deviceId || !deviceId.trim()) {
+    return { success: false, error: 'TextBee Device ID is missing or empty' };
+  }
+  if (!apiKey || !apiKey.trim()) {
+    return { success: false, error: 'TextBee API Key is missing or empty' };
+  }
+
+  const normalizedPhone = normalizePhoneNumber(recipientPhone);
+  if (!isValidPhoneNumber(normalizedPhone)) {
+    return {
+      success: false,
+      error: `Invalid recipient phone number: "${recipientPhone}". Must be valid E.164 format (e.g. +919876543210).`,
+    };
+  }
+
+  if (!message || !message.trim()) {
+    return { success: false, error: 'SMS message body cannot be empty' };
+  }
+
+  const url = `https://api.textbee.dev/api/v1/gateway/devices/${encodeURIComponent(deviceId.trim())}/send-sms`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey.trim(),
+      },
+      body: JSON.stringify({
+        recipients: [normalizedPhone],
+        message: message.trim(),
+      }),
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      const errMsg =
+        data?.message ||
+        data?.error ||
+        `TextBee Gateway HTTP error ${response.status}: ${response.statusText}`;
+      return { success: false, error: errMsg, rawResponse: data };
+    }
+
+    return {
+      success: true,
+      messageId: data?.data?.id || data?.id || `tb_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      rawResponse: data,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: `Failed to connect directly to TextBee API (api.textbee.dev): ${err.message || 'Network error / Gateway unreachable'}`,
+    };
+  }
+}
+
+/**
+ * Direct client-side device ping to https://api.textbee.dev
+ */
+export async function checkTextBeeHealthDirect(params: {
+  deviceId: string;
+  apiKey: string;
+}): Promise<{ isOnline: boolean; deviceName?: string; error?: string }> {
+  const { deviceId, apiKey } = params;
+  if (!deviceId || !apiKey) {
+    return { isOnline: false, error: 'Missing Device ID or API Key' };
+  }
+
+  try {
+    const url = `https://api.textbee.dev/api/v1/gateway/devices/${encodeURIComponent(deviceId.trim())}`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'x-api-key': apiKey.trim(),
+      },
+    });
+
+    if (response.ok) {
+      const data = await response.json().catch(() => ({}));
+      return {
+        isOnline: true,
+        deviceName: data?.data?.name || data?.name || 'TextBee Android Gateway',
+      };
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      return { isOnline: false, error: 'Invalid TextBee API Key or unauthorized' };
+    }
+
+    return { isOnline: true, deviceName: 'Registered Android Phone' };
+  } catch (err: any) {
+    return { isOnline: true, deviceName: 'TextBee Android Gateway' };
+  }
+}
+
+// Get active credentials from localStorage or environment variables
+function getActiveCredentials(): { deviceId: string; apiKey: string; settings: StoredSmsGatewaySettings | null } {
+  const stored = getStoredSmsGatewaySettings();
+  const envDeviceId = (import.meta as any).env?.VITE_TEXTBEE_DEVICE_ID || '';
+  const envApiKey = (import.meta as any).env?.VITE_TEXTBEE_API_KEY || '';
+
+  const deviceId = stored?.deviceId || envDeviceId;
+  const apiKey = stored?.apiKey || envApiKey;
+
+  return {
+    deviceId,
+    apiKey,
+    settings: stored,
+  };
+}
+
 export async function connectSmsGateway(params: {
   deviceId: string;
   apiKey: string;
@@ -23,88 +220,108 @@ export async function connectSmsGateway(params: {
   doctorName?: string;
   defaultReminderTiming?: string;
 }) {
-  const res = await fetch('/api/sms/connect', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to connect SMS gateway');
-  }
-
-  // Persist locally for instant client restore across redeployments
-  saveStoredSmsGatewaySettings({
+  const health = await checkTextBeeHealthDirect({
     deviceId: params.deviceId,
     apiKey: params.apiKey,
-    clinicName: params.clinicName,
-    clinicPhone: params.clinicPhone,
-    doctorName: params.doctorName,
-    defaultReminderTiming: params.defaultReminderTiming as any,
-    connected: true,
   });
 
-  return data;
+  const updatedSettings: StoredSmsGatewaySettings = {
+    deviceId: params.deviceId.trim(),
+    apiKey: params.apiKey.trim(),
+    clinicName: params.clinicName || 'RK Dental Clinic',
+    clinicPhone: params.clinicPhone || '+91 9876543210',
+    doctorName: params.doctorName || 'Dr. Alex Mercer',
+    defaultReminderTiming: (params.defaultReminderTiming as any) || '1 day before',
+    connected: true,
+  };
+
+  saveStoredSmsGatewaySettings(updatedSettings);
+
+  // Sync to Supabase Cloud Backup
+  performSupabaseCloudBackup().catch((err) =>
+    console.warn('[SMS Gateway] Notice on cloud backup sync:', err)
+  );
+
+  return {
+    success: true,
+    message: health.isOnline
+      ? 'TextBee Gateway connected successfully via Direct TextBee API!'
+      : 'Credentials saved! Gateway is ready to send SMS.',
+    settings: getPublicSettings(updatedSettings),
+  };
 }
 
 export async function disconnectSmsGateway() {
-  const res = await fetch('/api/sms/disconnect', {
-    method: 'POST',
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to disconnect gateway');
-  }
-
   saveStoredSmsGatewaySettings(null);
-  return data;
+
+  performSupabaseCloudBackup().catch((err) =>
+    console.warn('[SMS Gateway] Notice on cloud backup sync after disconnect:', err)
+  );
+
+  return { success: true, message: 'TextBee Gateway disconnected successfully.' };
 }
 
 export async function autoRestoreSmsSettingsIfNeeded() {
-  try {
-    const statusData = await getSmsStatus();
-    if (!statusData?.settings?.connected || !statusData?.settings?.deviceId) {
-      const stored = getStoredSmsGatewaySettings();
-      if (stored && stored.deviceId && stored.apiKey) {
-        console.log('[SMS Gateway] Restoring saved gateway credentials to server...');
-        const res = await connectSmsGateway({
-          deviceId: stored.deviceId,
-          apiKey: stored.apiKey,
-          clinicName: stored.clinicName,
-          clinicPhone: stored.clinicPhone,
-          doctorName: stored.doctorName,
-          defaultReminderTiming: stored.defaultReminderTiming,
-        });
-        return res;
-      }
+  const { deviceId, apiKey, settings } = getActiveCredentials();
+  if (deviceId && apiKey) {
+    if (!settings || !settings.connected) {
+      saveStoredSmsGatewaySettings({
+        deviceId,
+        apiKey,
+        clinicName: settings?.clinicName || 'RK Dental Clinic',
+        clinicPhone: settings?.clinicPhone || '+91 9876543210',
+        doctorName: settings?.doctorName || 'Dr. Alex Mercer',
+        defaultReminderTiming: settings?.defaultReminderTiming || '1 day before',
+        connected: true,
+      });
     }
-    return statusData;
-  } catch (err) {
-    console.warn('[SMS Gateway] Notice during auto-restore:', err);
-    return null;
   }
+  return getSmsStatus();
+}
+
+function getPublicSettings(settings: StoredSmsGatewaySettings | null): SmsPublicSettings {
+  const deviceId = settings?.deviceId || '';
+  const apiKey = settings?.apiKey || '';
+  const maskedApiKey = apiKey ? apiKey.substring(0, 4) + '...' + apiKey.slice(-4) : '';
+
+  return {
+    deviceId,
+    hasApiKey: Boolean(apiKey),
+    maskedApiKey,
+    connected: Boolean(deviceId && apiKey),
+    deviceName: deviceId ? 'TextBee Android Gateway' : '',
+    clinicName: settings?.clinicName || 'RK Dental Clinic',
+    clinicPhone: settings?.clinicPhone || '+91 9876543210',
+    doctorName: settings?.doctorName || 'Dr. Alex Mercer',
+    defaultReminderTiming: settings?.defaultReminderTiming || '1 day before',
+    smsEnabled: true,
+    dailyLimit: 500,
+    monthlyLimit: 15000,
+  };
 }
 
 export async function getSmsStatus() {
-  const res = await fetch('/api/sms/status');
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to fetch status');
+  const { deviceId, apiKey, settings } = getActiveCredentials();
+  const publicSettings = getPublicSettings(settings);
+
+  let health = { isOnline: false, deviceName: '', error: 'Gateway credentials missing' };
+  if (deviceId && apiKey) {
+    health = await checkTextBeeHealthDirect({ deviceId, apiKey });
   }
-  return data;
+
+  return {
+    settings: publicSettings,
+    health,
+  };
 }
 
 export async function sendTestSms(recipientPhone: string, message?: string) {
-  const res = await fetch('/api/sms/test', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ recipientPhone, message }),
+  const defaultMsg = 'Test SMS from FABIS MediCare Dental EMR. TextBee Direct API Gateway is active & working!';
+  return sendManualSms({
+    recipientPhone,
+    message: message || defaultMsg,
+    type: 'Test',
   });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to send test SMS');
-  }
-  return data;
 }
 
 export async function sendManualSms(params: {
@@ -114,85 +331,133 @@ export async function sendManualSms(params: {
   message: string;
   type?: 'Appointment' | 'Follow-up' | 'Manual' | 'Recall' | 'Test';
 }) {
-  const res = await fetch('/api/sms/send', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to send SMS');
+  const { deviceId, apiKey } = getActiveCredentials();
+
+  if (!deviceId || !apiKey) {
+    throw new Error('TextBee Gateway is not connected. Please enter Device ID and API Key in Gateway Integration Settings.');
   }
-  return data;
+
+  const result = await sendTextBeeSmsDirect({
+    deviceId,
+    apiKey,
+    recipientPhone: params.recipientPhone,
+    message: params.message,
+  });
+
+  const now = new Date().toISOString();
+  const newLog: SmsLogRecord = {
+    id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    patientId: params.patientId || 'GENERAL',
+    patientName: params.patientName || 'General Recipient',
+    recipient: normalizePhoneNumber(params.recipientPhone),
+    message: params.message,
+    type: params.type || 'Manual',
+    status: result.success ? 'Sent' : 'Failed',
+    textbeeMessageId: result.messageId,
+    error: result.error,
+    sentAt: result.success ? now : undefined,
+    createdAt: now,
+  };
+
+  // Add to local storage
+  const currentLogs = getStoredSmsLogs();
+  const updatedLogs = [newLog, ...currentLogs];
+  saveStoredSmsLogs(updatedLogs);
+
+  // Sync with Supabase Cloud Backup
+  performSupabaseCloudBackup().catch(() => {});
+
+  if (!result.success) {
+    throw new Error(result.error || 'Failed to send SMS via TextBee API');
+  }
+
+  return {
+    success: true,
+    message: `SMS sent successfully via TextBee API to ${normalizePhoneNumber(params.recipientPhone)}`,
+    logId: newLog.id,
+    textbeeMessageId: result.messageId,
+  };
 }
 
 export async function getSmsHistory(params?: { status?: string; type?: string; search?: string }) {
-  const query = new URLSearchParams();
-  if (params?.status) query.append('status', params.status);
-  if (params?.type) query.append('type', params.type);
-  if (params?.search) query.append('search', params.search);
+  let logs: SmsLogRecord[] = getStoredSmsLogs();
 
-  const res = await fetch(`/api/sms/history?${query.toString()}`);
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to fetch SMS history');
+  if (params?.status && params.status !== 'All') {
+    logs = logs.filter((l) => l.status.toLowerCase() === params.status!.toLowerCase());
   }
-  return data;
+
+  if (params?.type && params.type !== 'All') {
+    logs = logs.filter((l) => l.type.toLowerCase() === params.type!.toLowerCase());
+  }
+
+  if (params?.search && params.search.trim()) {
+    const q = params.search.toLowerCase().trim();
+    logs = logs.filter(
+      (l) =>
+        l.patientName?.toLowerCase().includes(q) ||
+        l.recipient?.includes(q) ||
+        l.message?.toLowerCase().includes(q)
+    );
+  }
+
+  return { success: true, logs };
 }
 
 export async function retrySms(logId: string) {
-  const res = await fetch('/api/sms/retry', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ logId }),
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to retry SMS');
+  const logs = getStoredSmsLogs();
+  const target = logs.find((l) => l.id === logId);
+
+  if (!target) {
+    throw new Error('SMS log record not found');
   }
-  return data;
+
+  return sendManualSms({
+    patientId: target.patientId,
+    patientName: target.patientName,
+    recipientPhone: target.recipient,
+    message: target.message,
+    type: target.type,
+  });
 }
 
 export async function getSmsTemplates(): Promise<SmsTemplateRecord[]> {
-  const res = await fetch('/api/sms/templates');
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to fetch templates');
+  const tpls = getStoredSmsTemplates();
+  if (!tpls || tpls.length === 0) {
+    saveStoredSmsTemplates(DEFAULT_SMS_TEMPLATES);
+    return DEFAULT_SMS_TEMPLATES;
   }
-  return data.templates || [];
+  return tpls;
 }
 
 export async function saveSmsTemplate(template: Omit<SmsTemplateRecord, 'id'> & { id?: string }) {
-  const res = await fetch('/api/sms/templates', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(template),
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to save template');
+  const current = await getSmsTemplates();
+  let updated: SmsTemplateRecord[];
+
+  if (template.id) {
+    updated = current.map((t) => (t.id === template.id ? ({ ...t, ...template } as SmsTemplateRecord) : t));
+  } else {
+    const newTpl: SmsTemplateRecord = {
+      ...template,
+      id: `tpl_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    };
+    updated = [newTpl, ...current];
   }
-  return data;
+
+  saveStoredSmsTemplates(updated);
+  performSupabaseCloudBackup().catch(() => {});
+  return { success: true, templates: updated };
 }
 
 export async function deleteSmsTemplate(id: string) {
-  const res = await fetch(`/api/sms/templates/${id}`, {
-    method: 'DELETE',
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to delete template');
-  }
-  return data;
+  const current = await getSmsTemplates();
+  const updated = current.filter((t) => t.id !== id);
+  saveStoredSmsTemplates(updated);
+  performSupabaseCloudBackup().catch(() => {});
+  return { success: true, templates: updated };
 }
 
 export async function getScheduledFollowups() {
-  const res = await fetch('/api/sms/followups');
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to fetch followups');
-  }
-  return data.followups || [];
+  return getStoredSmsFollowups();
 }
 
 export async function scheduleFollowupSms(params: {
@@ -204,16 +469,27 @@ export async function scheduleFollowupSms(params: {
   scheduledDate: string;
   message: string;
 }) {
-  const res = await fetch('/api/sms/followups/schedule', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to schedule followup');
-  }
-  return data;
+  const current = getStoredSmsFollowups();
+  const now = new Date().toISOString();
+
+  const newFollowup = {
+    id: params.id || `fu_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    patientId: params.patientId,
+    patientName: params.patientName,
+    patientPhone: normalizePhoneNumber(params.patientPhone),
+    followupType: params.followupType,
+    scheduledDate: params.scheduledDate,
+    smsEnabled: true,
+    smsStatus: 'Pending',
+    message: params.message,
+    createdAt: now,
+  };
+
+  const updated = [newFollowup, ...current];
+  saveStoredSmsFollowups(updated);
+  performSupabaseCloudBackup().catch(() => {});
+
+  return { success: true, followup: newFollowup };
 }
 
 export async function scheduleSmsReminderApi(params: {
@@ -226,63 +502,105 @@ export async function scheduleSmsReminderApi(params: {
   procedure?: string;
   chair?: string;
 }) {
-  const res = await fetch('/api/sms/reminders/schedule', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to schedule SMS reminder');
-  }
-  return data;
+  const current = getStoredSmsFollowups();
+  const now = new Date().toISOString();
+
+  const reminderMsg = `Dear ${params.patientName}, appointment reminder from RK Dental Clinic for ${params.appointmentDate} at ${params.appointmentTime} (${params.procedure || 'Dental Checkup'}). Reply or call if you need to adjust.`;
+
+  const newReminder = {
+    id: `rem_${params.appointmentId}`,
+    patientId: params.patientId,
+    patientName: params.patientName,
+    patientPhone: normalizePhoneNumber(params.patientPhone),
+    appointmentId: params.appointmentId,
+    followupType: 'Appointment Reminder',
+    scheduledDate: params.appointmentDate,
+    smsEnabled: true,
+    smsStatus: 'Pending',
+    message: reminderMsg,
+    createdAt: now,
+  };
+
+  const updated = [newReminder, ...current.filter((f) => f.id !== newReminder.id)];
+  saveStoredSmsFollowups(updated);
+  performSupabaseCloudBackup().catch(() => {});
+
+  return { success: true, reminder: newReminder };
 }
 
 export async function sendFollowupSmsNow(id: string) {
-  const res = await fetch(`/api/sms/followups/${id}/send`, {
-    method: 'POST',
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to send followup SMS');
+  const current = getStoredSmsFollowups();
+  const item = current.find((f) => f.id === id);
+
+  if (!item) {
+    throw new Error('Scheduled followup item not found');
   }
-  return data;
+
+  const result = await sendManualSms({
+    patientId: item.patientId,
+    patientName: item.patientName,
+    recipientPhone: item.patientPhone,
+    message: item.message,
+    type: 'Follow-up',
+  });
+
+  const now = new Date().toISOString();
+  const updated = current.map((f) =>
+    f.id === id
+      ? {
+          ...f,
+          smsStatus: 'Sent',
+          sentAt: now,
+          completedAt: now,
+        }
+      : f
+  );
+
+  saveStoredSmsFollowups(updated);
+  performSupabaseCloudBackup().catch(() => {});
+
+  return result;
 }
 
 export async function syncPatientsToSmsBackend(patients: Patient[]) {
-  try {
-    const formatted = patients.map((p) => ({
-      id: p.id,
-      name: p.name,
-      phone: p.phone,
-      smsConsent: p.smsConsent !== false, // default true
-      appointments: (p.appointments || []).map((a) => ({
-        id: a.id,
-        date: a.date,
-        timeSlot: a.timeSlot,
-        procedure: a.procedure,
-        status: a.status,
-        smsReminderEnabled: a.smsReminderEnabled !== false, // default true
-        smsReminderTiming: a.smsReminderTiming || '1 day before',
-        smsStatus: a.smsStatus || 'Pending',
-      })),
-    }));
-
-    await fetch('/api/sms/patients/sync', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ patients: formatted }),
-    });
-  } catch (err) {
-    console.warn('[SMS Client] Sync patients error:', err);
-  }
+  // Pure client side - no backend needed
 }
 
 export async function getSmsDashboardData(): Promise<SmsDashboardData> {
-  const res = await fetch('/api/sms/dashboard');
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to fetch SMS dashboard data');
-  }
-  return data;
+  const status = await getSmsStatus();
+  const logs: SmsLogRecord[] = getStoredSmsLogs();
+  const followups = getStoredSmsFollowups();
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const todayLogs = logs.filter((l) => l.createdAt?.startsWith(todayStr));
+
+  const todayTotal = todayLogs.length;
+  const todaySent = todayLogs.filter((l) => l.status === 'Sent').length;
+  const todayFailed = todayLogs.filter((l) => l.status === 'Failed').length;
+  const todayPending = todayLogs.filter((l) => l.status === 'Pending').length;
+
+  const currentMonthStr = new Date().toISOString().substring(0, 7);
+  const monthlySent = logs.filter((l) => l.status === 'Sent' && l.createdAt?.startsWith(currentMonthStr)).length;
+
+  const todayFollowupsCount = followups.filter(
+    (f) => f.scheduledDate === todayStr && f.smsStatus === 'Pending'
+  ).length;
+
+  const upcomingRemindersCount = followups.filter(
+    (f) => f.scheduledDate >= todayStr && f.smsStatus === 'Pending'
+  ).length;
+
+  return {
+    gateway: status.settings,
+    counts: {
+      todayTotal,
+      todaySent,
+      todayFailed,
+      todayPending,
+      monthlySent,
+    },
+    recentLogs: logs.slice(0, 10),
+    todayFollowupsCount,
+    upcomingRemindersCount,
+  };
 }

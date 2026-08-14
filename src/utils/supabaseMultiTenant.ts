@@ -11,19 +11,12 @@ export const getStoredSupabaseConfig = (): { url: string; anonKey: string } => {
   let url = (metaEnv.VITE_SUPABASE_URL as string) || '';
   let anonKey = (metaEnv.VITE_SUPABASE_ANON_KEY as string) || '';
 
-  try {
-    const customUrl = localStorage.getItem('fabis_supabase_custom_url');
-    const customKey = localStorage.getItem('fabis_supabase_custom_key');
-    if (customUrl && customUrl.trim()) url = customUrl.trim();
-    if (customKey && customKey.trim()) anonKey = customKey.trim();
-  } catch {}
-
-  if (!url) url = 'https://demo-clinic-emr.supabase.co';
-  if (!anonKey) anonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.demo-anon-key';
+  // Agar environment variables se URL na mile, tabhi fallback use karein
+  if (!url) url = 'https://xusaegwehwukwlqsqjsh.supabase.co';
+  if (!anonKey) anonKey = 'sb_publishable_rs_gvdLN0NCTvyWKpl32Fw_bL7_I0M3';
 
   return { url, anonKey };
 };
-
 let supabaseClient: SupabaseClient | null = null;
 
 export const reinitSupabaseClient = (): SupabaseClient | null => {

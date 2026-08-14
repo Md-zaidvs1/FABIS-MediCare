@@ -22,6 +22,9 @@ const STORAGE_KEYS = {
   CHAIRS: 'fabis_medicare_chairs_v1',
   DASHBOARD_SETTINGS: 'fabis_medicare_dashboard_settings_v1',
   SMS_SETTINGS: 'fabis_medicare_sms_gateway_v1',
+  SMS_LOGS: 'fabis_medicare_sms_logs_v1',
+  SMS_TEMPLATES: 'fabis_medicare_sms_templates_v1',
+  SMS_FOLLOWUPS: 'fabis_medicare_sms_followups_v1',
 };
 
 export const DEFAULT_DASHBOARD_SETTINGS: DashboardPersonalizationSettings = {
@@ -626,3 +629,58 @@ export const saveStoredSmsGatewaySettings = (settings: StoredSmsGatewaySettings 
     console.error('Error saving SMS gateway settings to storage', err);
   }
 };
+
+export const getStoredSmsLogs = (): any[] => {
+  try {
+    const data = localStorage.getItem(STORAGE_KEYS.SMS_LOGS);
+    if (data) return JSON.parse(data);
+  } catch (err) {
+    console.error('Error reading SMS logs from storage', err);
+  }
+  return [];
+};
+
+export const saveStoredSmsLogs = (logs: any[]): void => {
+  try {
+    localStorage.setItem(STORAGE_KEYS.SMS_LOGS, JSON.stringify(logs));
+  } catch (err) {
+    console.error('Error saving SMS logs to storage', err);
+  }
+};
+
+export const getStoredSmsTemplates = (): any[] => {
+  try {
+    const data = localStorage.getItem(STORAGE_KEYS.SMS_TEMPLATES);
+    if (data) return JSON.parse(data);
+  } catch (err) {
+    console.error('Error reading SMS templates from storage', err);
+  }
+  return [];
+};
+
+export const saveStoredSmsTemplates = (templates: any[]): void => {
+  try {
+    localStorage.setItem(STORAGE_KEYS.SMS_TEMPLATES, JSON.stringify(templates));
+  } catch (err) {
+    console.error('Error saving SMS templates to storage', err);
+  }
+};
+
+export const getStoredSmsFollowups = (): any[] => {
+  try {
+    const data = localStorage.getItem(STORAGE_KEYS.SMS_FOLLOWUPS);
+    if (data) return JSON.parse(data);
+  } catch (err) {
+    console.error('Error reading SMS followups from storage', err);
+  }
+  return [];
+};
+
+export const saveStoredSmsFollowups = (followups: any[]): void => {
+  try {
+    localStorage.setItem(STORAGE_KEYS.SMS_FOLLOWUPS, JSON.stringify(followups));
+  } catch (err) {
+    console.error('Error saving SMS followups to storage', err);
+  }
+};
+
