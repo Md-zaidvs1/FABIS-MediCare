@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf';
 import { Invoice, InvoiceItem, DoctorProfile, Patient } from '../types';
-import { formatDate } from './formatters';
+import { formatDate, formatPatientId } from './formatters';
 import { PrintTemplateConfig, getActiveTemplate, CanvasElement } from '../components/PrintDesigner/TemplateStorage';
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -525,7 +525,7 @@ export function generateInvoiceJsPdf(
 
   const pDetails = [
     { label: 'Patient Name', value: (invoice.patientName || patient?.name || 'ZAID').toUpperCase(), bold: true },
-    { label: 'Patient ID', value: patient?.id || 'PAT-112', bold: false },
+    { label: 'Patient ID', value: formatPatientId(patient || invoice.patientId) || 'RK881', bold: false },
     { label: 'Age / Gender', value: [patient?.age ? `${patient.age} Yrs` : '30 Yrs', patient?.gender || 'Male'].filter(Boolean).join(' / '), bold: false },
     { label: 'Mobile Number', value: patient?.phone || '+917418773765', bold: false },
     { label: 'Address', value: patient?.address || '#28 Hakeem abdullah sb street kivisharam, Melvisharam', bold: false },
@@ -772,9 +772,6 @@ export function generateInvoiceJsPdf(
   doc.setDrawColor(...BORDER_COLOR);
   doc.setLineWidth(0.4);
   doc.line(margin, footerY, pageWidth - margin, footerY);
-
-  // Small Tooth Icon in Center
-  drawToothIcon(doc, pageWidth / 2, footerY, 3, PURPLE);
 
   let footTextY = footerY + 5;
 

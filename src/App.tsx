@@ -3,12 +3,14 @@ import {
   Patient, 
   DoctorProfile, 
   ToothCondition, 
+  ToothRecord,
   TreatmentPlanItem, 
   Appointment, 
   FollowUpTask, 
   Invoice, 
   Prescription, 
   Vitals,
+  VisitRecord,
   UserRole
 } from './types';
 import { 
@@ -22,11 +24,15 @@ import {
   getStoredRole,
   saveStoredRole,
   getStoredTheme,
-  applyThemeToDocument
+  applyThemeToDocument,
+  normalizePatient
 } from './utils/storage';
-import { formatTodayISO, universalToFDI, getToothName } from './utils/formatters';
+import { formatTodayISO, universalToFDI, getToothName, getNextPatientRK, normalizeTimeSlot } from './utils/formatters';
 import { useOfflineSync } from './hooks/useOfflineSync';
 import { autoRestoreSmsSettingsIfNeeded } from './utils/smsApi';
+import { evaluateSoftwareAccess, SoftwareAccessState } from './utils/softwareLock';
+import { Lock404Screen } from './components/Lock404Screen';
+import { fetchClinicRecords } from './utils/supabaseMultiTenant';
 
 // Layout Components
 import { Header } from './components/Header';
@@ -88,12 +94,47 @@ export default function App() {
   const [viewingInvoice, setViewingInvoice] = useState<Invoice | null>(null);
   const [viewingPrescription, setViewingPrescription] = useState<Prescription | null>(null);
 
-  // Apply saved theme and auto-restore SMS gateway credentials on initial load
+  const [softwareAccess, setSoftwareAccess] = useState<SoftwareAccessState | null>(null);
+
+  const checkLicenseLock = async () => {
+    try {
+      const state = await evaluateSoftwareAccess();
+      setSoftwareAccess(state);
+      return state;
+    } catch (e) {
+      console.warn('License check notice:', e);
+      return null;
+    }
+  };
+
+  // Apply saved theme, auto-restore SMS gateway credentials, verify license lock, and load Supabase records on boot
   useEffect(() => {
     applyThemeToDocument(getStoredTheme());
+    checkLicenseLock();
+
+    const interval = setInterval(checkLicenseLock, 60000);
+    const handleLicenseUpdate = () => checkLicenseLock();
+    window.addEventListener('software-license-updated', handleLicenseUpdate);
+
     autoRestoreSmsSettingsIfNeeded().catch((err) =>
       console.warn('[SMS Boot Auto-Sync] Notice:', err)
     );
+
+    // Initial Supabase cloud sync
+    fetchClinicRecords<Patient>('patients')
+      .then((cloudRecords) => {
+        if (cloudRecords && cloudRecords.length > 0) {
+          const normalized = cloudRecords.map(normalizePatient);
+          setPatientsState(normalized);
+          savePatients(normalized);
+        }
+      })
+      .catch((err) => console.info('[Supabase Initial Sync] Note:', err));
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('software-license-updated', handleLicenseUpdate);
+    };
   }, []);
 
   // Sync patients changes to localStorage and IndexedDB (Dual Save)
@@ -114,6 +155,7 @@ export default function App() {
     setLoggedInUsername(username);
     setLoggedIn(true);
     setIsLoggedInState(true);
+    checkLicenseLock();
   };
 
   const handleLogout = () => {
@@ -147,17 +189,38 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  // Login Page is ALWAYS accessible
   if (!isLoggedIn) {
-    return <DoctorLogin doctor={doctor} onLoginSuccess={handleLoginSuccess} />;
+    return (
+      <DoctorLogin
+        doctor={doctor}
+        onLoginSuccess={handleLoginSuccess}
+      />
+    );
+  }
+
+  // If Doctor is logged in but Doctor Access is Locked or Maintenance Mode is ON, show 404 / Maintenance screen
+  if (activeRole === 'doctor' && softwareAccess?.isLocked) {
+    return (
+      <Lock404Screen
+        onAdminUnlocked={checkLicenseLock}
+        onAdminBypassLogin={(role, username) => {
+          handleLoginSuccess(role, username);
+          checkLicenseLock();
+        }}
+        onReturnToLogin={handleLogout}
+        isMaintenanceMode={softwareAccess?.maintenanceMode}
+      />
+    );
   }
 
   const selectedPatient = patients.find((p) => p.id === selectedPatientId);
 
   // Today's appointments count for sidebar badge
   const todayStr = formatTodayISO();
-  const todayAppointmentsCount = patients
-    .flatMap((p) => p.appointments)
-    .filter((a) => a.date === todayStr).length;
+  const todayAppointmentsCount = (patients || [])
+    .flatMap((p) => p?.appointments || [])
+    .filter((a) => a && a.date === todayStr).length;
 
   // Patient Actions
   const handleAddPatient = (
@@ -166,8 +229,7 @@ export default function App() {
       'id' | 'mrn' | 'createdAt' | 'teethMap' | 'treatmentPlans' | 'prescriptions' | 'invoices' | 'appointments' | 'followUps' | 'media'
     >
   ): Patient => {
-    const newId = `PAT-${100 + patients.length + 1}`;
-    const newMrn = `FM-2026-${100 + patients.length + 1}`;
+    const { id: newId, mrn: newMrn } = getNextPatientRK(patients);
 
     const blankTeethMap: Patient['teethMap'] = {};
     for (let i = 1; i <= 32; i++) {
@@ -323,10 +385,87 @@ export default function App() {
     updatePatients(updated);
   };
 
+  const handleSaveClinicalExamination = (
+    patientId: string,
+    examData: {
+      vitals: Vitals;
+      chiefComplaint: string;
+      medicalConditions: { condition: string; hasCondition: boolean }[];
+      dentalHistory: string;
+      clinicalFindings: string[];
+      calculus: '+' | '++' | '+++' | null;
+      stains: '+' | '++' | '+++' | null;
+      gingivalRecession: string;
+      teethMap: Record<number, ToothRecord>;
+      treatmentPlanText: string;
+    }
+  ) => {
+    const targetPatient = patients.find((p) => p.id === patientId);
+    if (!targetPatient) return;
+
+    const todayIso = new Date().toISOString().split('T')[0];
+    const newVisitId = `VISIT-${Date.now()}`;
+
+    // Extract positive tooth findings
+    const toothFindings = Object.values(examData.teethMap || {})
+      .filter((t) => t && t.condition !== 'Healthy')
+      .map((t) => ({
+        toothNumber: t.toothNumber,
+        fdiNumber: t.fdiNumber || t.toothNumber,
+        condition: t.condition,
+        notes: t.notes,
+      }));
+
+    const newVisit: VisitRecord = {
+      id: newVisitId,
+      date: todayIso,
+      chiefComplaint: examData.chiefComplaint,
+      vitals: examData.vitals,
+      medicalConditions: examData.medicalConditions,
+      dentalHistory: examData.dentalHistory,
+      clinicalFindings: examData.clinicalFindings,
+      calculus: examData.calculus,
+      stains: examData.stains,
+      gingivalRecession: examData.gingivalRecession,
+      toothFindings,
+      treatmentPlanText: examData.treatmentPlanText,
+      procedures: examData.clinicalFindings.length > 0 ? examData.clinicalFindings : ['Clinical Examination'],
+      notes: examData.treatmentPlanText,
+    };
+
+    // Systemic conditions for patient profile
+    const systemicConditions = examData.medicalConditions
+      .filter((c) => c.hasCondition)
+      .map((c) => c.condition);
+
+    const updated = patients.map((p) => {
+      if (p.id !== patientId) return p;
+      return {
+        ...p,
+        vitals: {
+          ...p.vitals,
+          ...examData.vitals,
+          updatedAt: new Date().toISOString(),
+        },
+        medicalHistory: {
+          ...p.medicalHistory,
+          systemicConditions,
+          notes: examData.dentalHistory || p.medicalHistory?.notes,
+        },
+        teethMap: examData.teethMap,
+        visitHistory: [newVisit, ...(p.visitHistory || [])],
+      };
+    });
+
+    updatePatients(updated);
+  };
+
   const handleBookAppointment = (appointment: Omit<Appointment, 'id'>) => {
     const nowIso = new Date().toISOString();
+    const normalizedTimeSlot = normalizeTimeSlot(appointment.timeSlot);
     const newApt: Appointment = {
       ...appointment,
+      timeSlot: normalizedTimeSlot,
       id: `APT-${Date.now()}`,
       createdAt: appointment.createdAt || nowIso,
       updatedAt: nowIso,
@@ -405,6 +544,7 @@ export default function App() {
     newTimeSlot: string,
     newDate?: string
   ) => {
+    const normalizedTimeSlot = normalizeTimeSlot(newTimeSlot);
     const updated = patients.map((p) => {
       const appointments = p.appointments || [];
       const aptExists = appointments.some((a) => a.id === appointmentId);
@@ -413,7 +553,7 @@ export default function App() {
         ...p,
         appointments: appointments.map((a) =>
           a.id === appointmentId
-            ? { ...a, timeSlot: newTimeSlot, date: newDate || a.date }
+            ? { ...a, timeSlot: normalizedTimeSlot, date: newDate || a.date }
             : a
         ),
       };
@@ -479,7 +619,7 @@ export default function App() {
       if (p.id !== patientId) return p;
       return {
         ...p,
-        followUps: [newFollowUp, ...p.followUps],
+        followUps: [newFollowUp, ...(p.followUps || [])],
       };
     });
     updatePatients(updated);
@@ -584,6 +724,13 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-theme-page text-theme-main flex flex-col font-sans antialiased selection:bg-theme-accent selection:text-white transition-colors duration-200 overflow-x-hidden">
+      {/* Warning Notice on 1 September 2026 */}
+      {softwareAccess?.isWarningDay && (
+        <div className="w-full bg-amber-400 text-slate-950 font-extrabold text-xs py-2.5 px-4 text-center shadow-md flex items-center justify-center gap-2 border-b border-amber-500 z-50">
+          <span>⚠️ Tomorrow is the last day to continue using this software.</span>
+        </div>
+      )}
+
       {/* Top Application Header */}
       <Header
         doctor={doctor}
@@ -679,6 +826,7 @@ export default function App() {
                 onUpdateTreatmentPlanCost={handleUpdateTreatmentPlanCost}
                 onDeleteTreatmentPlan={handleDeleteTreatmentPlan}
                 onUpdateVitals={handleUpdateVitals}
+                onSaveClinicalExamination={handleSaveClinicalExamination}
                 onOpenBookAppointment={(date, pid) => {
                   setAppointmentDefaultDate(date);
                   setAppointmentDefaultPatientId(pid || selectedPatient.id);
@@ -833,6 +981,12 @@ export default function App() {
         defaultPatientId={prescriptionDefaultPatientId}
         initialPrescription={viewingPrescription}
         onSavePrescription={handleSavePrescription}
+        onProceedToBilling={(pId) => {
+          setIsPrescriptionOpen(false);
+          setViewingPrescription(null);
+          setInvoiceDefaultPatientId(pId);
+          setIsCreateInvoiceOpen(true);
+        }}
       />
 
       <ViewInvoiceModal

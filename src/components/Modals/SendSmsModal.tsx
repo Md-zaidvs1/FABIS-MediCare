@@ -99,7 +99,7 @@ export const SendSmsModal: React.FC<SendSmsModalProps> = ({
         onClose();
       }, 2000);
     } catch (err: any) {
-      setError(err.message || 'Failed to send SMS');
+      setError('Message could not be sent. Please check TextBee connection.');
     } finally {
       setIsSending(false);
     }

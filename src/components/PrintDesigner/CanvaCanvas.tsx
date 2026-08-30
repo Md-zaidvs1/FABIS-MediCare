@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { CanvasElement, PrintTemplateConfig, DYNAMIC_FIELDS_LIST } from './TemplateStorage';
 import { DoctorProfile, Patient } from '../../types';
-import { formatCurrency } from '../../utils/formatters';
+import { formatCurrency, formatPatientId } from '../../utils/formatters';
 import {
   Lock,
   Unlock,
@@ -88,7 +88,7 @@ export const CanvaCanvas: React.FC<CanvaCanvasProps> = ({
   const getFieldValue = (fieldKey: string) => {
     if (patient) {
       if (fieldKey === 'patient_name') return patient.name;
-      if (fieldKey === 'mrn') return patient.id;
+      if (fieldKey === 'mrn' || fieldKey === 'patient_id') return formatPatientId(patient);
       if (fieldKey === 'age') return `${patient.age} Yrs`;
       if (fieldKey === 'gender') return patient.gender;
       if (fieldKey === 'mobile') return patient.phone;

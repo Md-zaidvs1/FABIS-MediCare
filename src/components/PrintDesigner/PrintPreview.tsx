@@ -573,7 +573,7 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({ config, doctor, pati
         }}
       >
         <div className="space-y-4">
-          {/* Header Section */}
+          {/* Header Section matching Bill A4 */}
           <div
             className="flex flex-col sm:flex-row justify-between items-start pb-4 border-b gap-3"
             style={{
@@ -584,7 +584,14 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({ config, doctor, pati
             {/* Clinic Info */}
             <div className="flex items-start gap-3">
               {config.showLogo && (
-                <div className="w-12 h-12 rounded-xl bg-sky-100 flex items-center justify-center shrink-0 border border-sky-200 text-sky-700">
+                <div
+                  className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 border"
+                  style={{
+                    backgroundColor: `${config.primaryColor}15`,
+                    borderColor: `${config.primaryColor}30`,
+                    color: config.primaryColor,
+                  }}
+                >
                   {config.logoUrl ? (
                     <img src={config.logoUrl} alt="Logo" className="w-full h-full object-contain rounded-xl" />
                   ) : (
@@ -607,14 +614,20 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({ config, doctor, pati
                   </p>
                 )}
                 <div className="flex flex-wrap gap-x-3 text-[11px] text-slate-500 mt-0.5">
-                  {config.showClinicPhone && <span>Ph: {config.clinicPhoneOverride || doctor.clinicPhone}</span>}
-                  {config.showClinicEmail && <span>| {config.clinicEmailOverride || doctor.clinicEmail}</span>}
+                  {config.showClinicPhone && <span>Ph: {config.clinicPhoneOverride || doctor.clinicPhone || '+91 8883261285'}</span>}
+                  {config.showClinicEmail && <span>| {config.clinicEmailOverride || doctor.clinicEmail || 'contact@fabismedicare.com'}</span>}
                 </div>
               </div>
             </div>
 
-            {/* Doctor Info (Right) */}
-            <div className="text-right sm:text-right">
+            {/* Document Title Banner & Doctor Info (Right) */}
+            <div className="text-right sm:text-right self-start">
+              <span
+                className="inline-block px-3 py-1 rounded-lg text-white font-black text-xs uppercase tracking-wider mb-1.5"
+                style={{ backgroundColor: config.primaryColor }}
+              >
+                PRESCRIPTION
+              </span>
               {config.showDoctorName && (
                 <p className="font-extrabold text-slate-900 text-sm">Dr. {config.doctorNameOverride || doctor.name}</p>
               )}
@@ -622,54 +635,152 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({ config, doctor, pati
                 <p className="text-[11px] text-slate-500">{config.qualificationOverride || doctor.qualifications || 'BDS, MDS'}</p>
               )}
               {config.showRegNumber && (
-                <p className="text-[11px] font-bold text-sky-700 mt-0.5">
+                <p className="text-[11px] font-bold mt-0.5" style={{ color: config.primaryColor }}>
                   Reg #: {config.regNumberOverride || doctor.regNumber || 'DENT-12345'}
                 </p>
               )}
             </div>
           </div>
 
-          {/* Patient Details Card */}
-          <div className="p-3 bg-sky-50/50 rounded-xl border border-sky-100 flex flex-col sm:flex-row justify-between gap-2 text-xs">
-            <div>
-              <p className="font-bold text-slate-900">
-                Patient: <span className="text-slate-900 font-extrabold">{activePatient.name}</span>
-                <span className="font-normal text-slate-500 ml-2">({activePatient.age} Yrs / {activePatient.gender})</span>
-              </p>
-              <p className="text-slate-500 text-[11px] mt-0.5">MRN: <span className="font-mono font-bold text-slate-700">{activePatient.id}</span></p>
+          {/* Patient & Prescription Info Cards Grid (Twin 2-Column Cards) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Patient Details Card */}
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1.5 text-xs">
+              <div
+                className="text-[11px] font-extrabold uppercase tracking-wider mb-1.5 pb-1 border-b border-slate-200"
+                style={{ color: config.primaryColor }}
+              >
+                PATIENT DETAILS
+              </div>
+              <div className="flex justify-between items-start gap-2">
+                <span className="text-slate-500 shrink-0">Patient:</span>
+                <span className="font-bold text-slate-800 text-right truncate">{activePatient.name.toUpperCase()}</span>
+              </div>
+              <div className="flex justify-between items-start gap-2">
+                <span className="text-slate-500 shrink-0">Patient ID:</span>
+                <span className="font-mono text-slate-700 font-bold text-right">{activePatient.id}</span>
+              </div>
+              <div className="flex justify-between items-start gap-2">
+                <span className="text-slate-500 shrink-0">Age / Gender:</span>
+                <span className="text-slate-700 text-right">{activePatient.age} Yrs / {activePatient.gender}</span>
+              </div>
+              <div className="flex justify-between items-start gap-2">
+                <span className="text-slate-500 shrink-0">Contact No:</span>
+                <span className="text-slate-700 text-right">{activePatient.mobile}</span>
+              </div>
+              <div className="flex justify-between items-start gap-2">
+                <span className="text-slate-500 shrink-0">Address:</span>
+                <span className="text-slate-700 text-right truncate max-w-[180px]">{activePatient.address || 'Kalavai, Tamil Nadu'}</span>
+              </div>
             </div>
-            <div className="sm:text-right text-[11px] text-slate-600">
-              <p>Date: {new Date().toLocaleDateString('en-IN')}</p>
-              <p>Rx ID: <span className="font-mono font-bold">RX-2026-042</span></p>
+
+            {/* Prescription Details Card */}
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1.5 text-xs">
+              <div
+                className="text-[11px] font-extrabold uppercase tracking-wider mb-1.5 pb-1 border-b border-slate-200"
+                style={{ color: config.primaryColor }}
+              >
+                PRESCRIPTION DETAILS
+              </div>
+              <div className="flex justify-between items-start gap-2">
+                <span className="text-slate-500 shrink-0">Rx Number:</span>
+                <span className="font-mono font-bold text-slate-800 text-right">#RX-2026-042</span>
+              </div>
+              <div className="flex justify-between items-start gap-2">
+                <span className="text-slate-500 shrink-0">Date:</span>
+                <span className="text-slate-700 text-right">{new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+              </div>
+              <div className="flex justify-between items-start gap-2">
+                <span className="text-slate-500 shrink-0">Chief Complaint:</span>
+                <span className="text-slate-700 text-right truncate max-w-[180px]">Pain in lower right molar (#46)</span>
+              </div>
+              <div className="flex justify-between items-start gap-2">
+                <span className="text-slate-500 shrink-0">Diagnosis:</span>
+                <span className="font-bold text-slate-800 text-right truncate max-w-[180px]">Acute Irreversible Pulpitis</span>
+              </div>
+              <div className="flex justify-between items-center pt-1">
+                <span className="text-slate-500">Status:</span>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-emerald-100 text-emerald-800">
+                  ACTIVE RX
+                </span>
+              </div>
             </div>
           </div>
 
-          {/* Rx Symbol & Prescribed Medications */}
-          <div className="space-y-3 pt-2">
+          {/* Prescribed Medicines Table */}
+          <div className="rounded-xl border border-slate-200 overflow-hidden">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead style={{ backgroundColor: `${config.primaryColor}15`, color: config.primaryColor }}>
+                <tr className="font-extrabold text-[11px] uppercase border-b border-slate-200">
+                  <th className="p-2.5 whitespace-nowrap">#</th>
+                  <th className="p-2.5 whitespace-nowrap">Medicine Name & Formulation</th>
+                  <th className="p-2.5 whitespace-nowrap">Dosage</th>
+                  <th className="p-2.5 whitespace-nowrap">Frequency / Timing</th>
+                  <th className="p-2.5 whitespace-nowrap">Duration</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-slate-800">
+                <tr className="hover:bg-slate-50">
+                  <td className="p-2.5 font-medium text-slate-500 whitespace-nowrap">1</td>
+                  <td className="p-2.5 font-bold text-slate-900">
+                    <div>Amoxicillin + Clavulanic Acid 625mg</div>
+                    <div className="text-[10px] text-slate-500 font-normal">Form: Augmentin 625 Tab</div>
+                  </td>
+                  <td className="p-2.5 text-slate-600 whitespace-nowrap">1 Tab</td>
+                  <td className="p-2.5 font-bold whitespace-nowrap" style={{ color: config.primaryColor }}>
+                    1 - 0 - 1 (After Food)
+                  </td>
+                  <td className="p-2.5 font-bold text-slate-800 whitespace-nowrap">5 Days</td>
+                </tr>
+                <tr className="hover:bg-slate-50">
+                  <td className="p-2.5 font-medium text-slate-500 whitespace-nowrap">2</td>
+                  <td className="p-2.5 font-bold text-slate-900">
+                    <div>Zerodol-SP</div>
+                    <div className="text-[10px] text-slate-500 font-normal">Form: Aceclofenac + Paracetamol + Serratiopeptidase</div>
+                  </td>
+                  <td className="p-2.5 text-slate-600 whitespace-nowrap">1 Tab</td>
+                  <td className="p-2.5 font-bold whitespace-nowrap" style={{ color: config.primaryColor }}>
+                    1 - 0 - 1 (SOS Pain)
+                  </td>
+                  <td className="p-2.5 font-bold text-slate-800 whitespace-nowrap">3 Days</td>
+                </tr>
+                <tr className="hover:bg-slate-50">
+                  <td className="p-2.5 font-medium text-slate-500 whitespace-nowrap">3</td>
+                  <td className="p-2.5 font-bold text-slate-900">
+                    <div>Chlorhexidine 0.2% Mouthwash</div>
+                    <div className="text-[10px] text-slate-500 font-normal">Form: Hexidine Oral Rinse</div>
+                  </td>
+                  <td className="p-2.5 text-slate-600 whitespace-nowrap">10ml swish</td>
+                  <td className="p-2.5 font-bold whitespace-nowrap" style={{ color: config.primaryColor }}>
+                    1 - 0 - 1 (After Brushing)
+                  </td>
+                  <td className="p-2.5 font-bold text-slate-800 whitespace-nowrap">7 Days</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          {/* Doctor Advice Box */}
+          {config.showTerms && config.termsText && (
+            <div className="bg-amber-50 p-4 rounded-xl border border-amber-200 space-y-1">
+              <p className="font-bold text-amber-900 text-xs uppercase tracking-wide">
+                DOCTOR ADVICE / SPECIAL INSTRUCTIONS:
+              </p>
+              <p className="text-amber-950 text-xs leading-relaxed whitespace-pre-line">{config.termsText}</p>
+            </div>
+          )}
+
+          {/* Next Visit / Follow-up Box */}
+          <div className="bg-sky-50 p-3 rounded-xl border border-sky-200 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="text-2xl font-black italic font-serif" style={{ color: config.primaryColor }}>
-                Rx
+              <Stethoscope className="w-4 h-4 text-sky-600" />
+              <span className="font-bold text-xs text-sky-900">
+                Follow-up Visit: <span className="font-black text-sky-700">In 5 Days (Post-medication Review)</span>
               </span>
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Medical Prescription</span>
             </div>
-
-            <div className="space-y-2.5 pl-2 border-l-2" style={{ borderColor: `${config.primaryColor}40` }}>
-              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 text-xs">
-                <p className="font-bold text-slate-900">1. Tab. Amoxicillin + Clavulanate (Augmentin 625mg)</p>
-                <p className="text-slate-600 text-[11px] mt-0.5">Dosage: 1 - 0 - 1 (After Food) | Duration: 5 Days</p>
-                <p className="text-slate-400 text-[10px] italic">Note: Complete full antibiotic course.</p>
-              </div>
-
-              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 text-xs">
-                <p className="font-bold text-slate-900">2. Tab. Zerodol-SP (Aceclofenac + Paracetamol + Serratiopeptidase)</p>
-                <p className="text-slate-600 text-[11px] mt-0.5">Dosage: 1 - 0 - 1 (As needed for pain) | Duration: 3 Days</p>
-              </div>
-
-              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 text-xs">
-                <p className="font-bold text-slate-900">3. Chlorhexidine Mouthwash 0.2% (Hexidine)</p>
-                <p className="text-slate-600 text-[11px] mt-0.5">Dosage: 10ml warm water rinse twice daily | Duration: 7 Days</p>
-              </div>
-            </div>
+            <span className="text-[10px] font-bold uppercase text-sky-600 bg-sky-100 px-2.5 py-0.5 rounded-full">
+              Recommended
+            </span>
           </div>
         </div>
 
@@ -683,14 +794,15 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({ config, doctor, pati
         >
           <div className="flex flex-col sm:flex-row justify-between items-end gap-3 text-xs">
             <div className="space-y-1 max-w-sm">
-              {config.showTerms && config.termsText && (
-                <div>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Instructions & Advice</p>
-                  <p className="text-[10px] text-slate-600 whitespace-pre-line">{config.termsText}</p>
-                </div>
-              )}
+              <div className="text-[10px] text-slate-500 space-y-0.5">
+                <p className="font-bold" style={{ color: config.primaryColor }}>Digital EMR Certified Prescription</p>
+                <p className="text-slate-400">* Please follow prescribed dosage instructions carefully.</p>
+                <p className="text-slate-400">* In case of any adverse reactions or acute pain, contact clinic immediately.</p>
+              </div>
               {config.showThankYou && (
-                <p className="text-xs font-bold text-sky-700 pt-1">{config.thankYouMessage || 'Wishing you a speedy recovery!'}</p>
+                <p className="text-xs font-bold pt-1" style={{ color: config.primaryColor }}>
+                  {config.thankYouMessage || 'Wishing you a speedy recovery!'}
+                </p>
               )}
             </div>
 
@@ -700,6 +812,7 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({ config, doctor, pati
                   {config.signatureText || 'Doctor Signature'}
                 </div>
                 <p className="text-[10px] font-bold text-slate-700 mt-1">Dr. {config.doctorNameOverride || doctor.name}</p>
+                <p className="text-[9px] text-slate-400">Doctor Signature & Stamp</p>
               </div>
             )}
           </div>

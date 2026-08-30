@@ -1,9 +1,20 @@
-import { sharePdfDocument, generatePdfBlobFromElement } from './pdfShareEngine';
+import { sharePdfDocument, shareTextMessage, generatePdfBlobFromElement } from './pdfShareEngine';
 import { generateInvoiceJsPdf, generateInvoiceThermalJsPdf } from './jsPdfInvoiceGenerator';
-import { generatePrescriptionJsPdf } from './jsPdfPrescriptionGenerator';
+import { generatePrescriptionJsPdf, generatePrescriptionThermalJsPdf } from './jsPdfPrescriptionGenerator';
+import { generateClinicalHistoryJsPdf } from './jsPdfClinicalHistoryGenerator';
 import { Invoice, Prescription, DoctorProfile, Patient } from '../types';
+import { formatPatientId, formatDate } from './formatters';
 
-export { generatePdfBlobFromElement, sharePdfDocument, generateInvoiceJsPdf, generateInvoiceThermalJsPdf, generatePrescriptionJsPdf };
+export { 
+  generatePdfBlobFromElement, 
+  sharePdfDocument, 
+  shareTextMessage,
+  generateInvoiceJsPdf, 
+  generateInvoiceThermalJsPdf, 
+  generatePrescriptionJsPdf,
+  generatePrescriptionThermalJsPdf,
+  generateClinicalHistoryJsPdf 
+};
 
 /**
  * Universal Direct Print Trigger using PDF Blob iframe
@@ -57,23 +68,32 @@ export async function shareInvoicePdf({
   patient?: Patient | null;
   customLogo?: string | null;
   format?: 'a4' | 'thermal';
-}): Promise<void> {
-  const safePatientName = (invoice.patientName || patient?.name || 'Patient').replace(/\s+/g, '_');
+}) {
+  const patientName = patient?.name || invoice.patientName || 'Patient';
+  const safePatientName = patientName.replace(/[^a-zA-Z0-9]/g, '_');
+  const patientId = formatPatientId(patient || invoice.patientId || '');
+  const patientPhone = patient?.phone || (patient as any)?.mobile || (invoice as any).patientPhone || (invoice as any).patientMobile || '';
+
   const fileName = format === 'thermal'
-    ? `Invoice_Receipt_${invoice.id}_${safePatientName}.pdf`
+    ? `Invoice_Thermal_${invoice.id}_${safePatientName}.pdf`
     : `Invoice_${invoice.id}_${safePatientName}.pdf`;
-  const text = `Hello ${invoice.patientName || patient?.name || 'Patient'}, here is your tax invoice #${invoice.id} from ${doctor.clinicName}.`;
+
+  const docTypeName = format === 'thermal' ? '80mm Thermal Receipt' : 'A4 Tax Invoice';
+  const text = `Hello ${patientName},\n\nPlease find attached your ${docTypeName} (${invoice.id}) from ${doctor.clinicName}.\n\nPatient ID: ${patientId}\nNet Total: ₹${invoice.netTotal.toLocaleString('en-IN')}\nStatus: ${invoice.status}\nDate: ${formatDate(invoice.date)}\nClinic: ${doctor.clinicName}\nContact: ${doctor.clinicPhone}`;
   
   const pdfBlob = format === 'thermal'
     ? generateInvoiceThermalJsPdf(invoice, doctor, patient, customLogo)
     : generateInvoiceJsPdf(invoice, doctor, patient, customLogo);
 
-  await sharePdfDocument({
+  return sharePdfDocument({
     pdfBlob,
     fileName,
-    title: `Tax Invoice #${invoice.id} - ${doctor.clinicName}`,
+    title: `${docTypeName} #${invoice.id} - ${patientName}`,
     text,
-    patientMobile: patient?.phone || '',
+    patientMobile: patientPhone,
+    patientName,
+    patientId,
+    documentType: docTypeName,
   });
 }
 
@@ -85,24 +105,69 @@ export async function sharePrescriptionPdf({
   doctor,
   patient,
   customLogo,
+  format = 'a4',
 }: {
   rx: Prescription;
   doctor: DoctorProfile;
   patient?: Patient | null;
   customLogo?: string | null;
-}): Promise<void> {
-  const safePatientName = (rx.patientName || patient?.name || 'Patient').replace(/\s+/g, '_');
-  const fileName = `Prescription_${rx.id}_${safePatientName}.pdf`;
-  const text = `Hello ${rx.patientName || patient?.name || 'Patient'}, here is your prescription #${rx.id} from ${doctor.clinicName}.`;
+  format?: 'a4' | 'thermal';
+}) {
+  const patientName = patient?.name || rx.patientName || 'Patient';
+  const safePatientName = patientName.replace(/[^a-zA-Z0-9]/g, '_');
+  const patientId = formatPatientId(patient || rx.patientId || '');
+  const patientPhone = patient?.phone || (patient as any)?.mobile || (rx as any).patientPhone || (rx as any).patientMobile || '';
 
-  const pdfBlob = generatePrescriptionJsPdf(rx, doctor, patient, customLogo);
+  const fileName = format === 'thermal'
+    ? `Prescription_Thermal_${rx.id}_${safePatientName}.pdf`
+    : `Prescription_${rx.id}_${safePatientName}.pdf`;
 
-  await sharePdfDocument({
+  const docTypeName = format === 'thermal' ? '80mm Thermal Prescription' : 'A4 Prescription';
+  const text = `Hello ${patientName},\n\nPlease find attached your ${docTypeName} (${rx.id}) from ${doctor.clinicName}.\n\nPatient ID: ${patientId}\nDate: ${formatDate(rx.date)}\nClinic: ${doctor.clinicName}\nContact: ${doctor.clinicPhone}`;
+
+  const pdfBlob = format === 'thermal'
+    ? generatePrescriptionThermalJsPdf(rx, doctor, patient, customLogo)
+    : generatePrescriptionJsPdf(rx, doctor, patient, customLogo);
+
+  return sharePdfDocument({
     pdfBlob,
     fileName,
-    title: `Prescription #${rx.id} - ${doctor.clinicName}`,
+    title: `${docTypeName} #${rx.id} - ${patientName}`,
     text,
-    patientMobile: patient?.phone || '',
+    patientMobile: patientPhone,
+    patientName,
+    patientId,
+    documentType: docTypeName,
+  });
+}
+
+/**
+ * Standardized Patient Clinical History PDF Generator & Native Share Engine Caller
+ */
+export async function shareClinicalHistoryPdf({
+  patient,
+  doctor,
+  customLogo,
+}: {
+  patient: Patient;
+  doctor: DoctorProfile;
+  customLogo?: string | null;
+}) {
+  const safePatientName = (patient.name || 'Patient').replace(/\s+/g, '_');
+  const fileName = `Clinical_History_${patient.mrn}_${safePatientName}.pdf`;
+  const text = `Hello ${patient.name}, here is your comprehensive dental clinical history and examination record from ${doctor.clinicName}.`;
+
+  const pdfBlob = generateClinicalHistoryJsPdf(patient, doctor, customLogo);
+
+  return sharePdfDocument({
+    pdfBlob,
+    fileName,
+    title: `Clinical History - ${patient.name} (${patient.mrn})`,
+    text,
+    patientMobile: patient.phone || (patient as any)?.mobile || '',
+    patientName: patient.name,
+    patientId: patient.mrn,
+    documentType: 'Clinical History',
   });
 }
 

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Patient, Appointment } from '../../types';
 import { formatDate, formatCurrency } from '../../utils/formatters';
+import { shareTextMessage } from '../../utils/pdfShare';
 import { Bell, Calendar, CheckCircle2, MessageCircle, Phone, Send, Sparkles, User, X } from 'lucide-react';
 
 interface RecallTrackerModalProps {
@@ -61,11 +62,13 @@ export const RecallTrackerModal: React.FC<RecallTrackerModalProps> = ({
     : recallList.filter((item) => item.recallType === activeTab);
 
   const handleSendWhatsApp = (item: typeof recallList[0]) => {
-    const cleanPhone = item.phone.replace(/[^0-9]/g, '');
-    const message = encodeURIComponent(
-      `Hello ${item.patient.name}, this is FABIS MediCare Dental Clinic. You are due for your ${item.recallType} (${item.reason}). Kindly contact us to book your preferred appointment slot.`
-    );
-    window.open(`https://wa.me/${cleanPhone}?text=${message}`, '_blank');
+    const message = `Hello ${item.patient.name}, this is FABIS MediCare Dental Clinic. You are due for your ${item.recallType} (${item.reason}). Kindly contact us to book your preferred appointment slot.`;
+    shareTextMessage({
+      title: `FABIS MediCare - ${item.recallType}`,
+      text: message,
+      patientMobile: item.phone || item.patient.phone || '',
+      patientName: item.patient.name,
+    });
 
     setRemindedIds((prev) => ({ ...prev, [item.id]: true }));
   };

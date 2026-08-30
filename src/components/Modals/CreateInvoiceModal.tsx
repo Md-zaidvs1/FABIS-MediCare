@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Patient, Invoice, PaymentMethod } from '../../types';
-import { formatCurrency, formatTodayISO } from '../../utils/formatters';
+import { formatCurrency, formatTodayISO, formatPatientId } from '../../utils/formatters';
 import {
   BillTemplateItem,
   DEFAULT_BILL_TEMPLATES,
@@ -96,7 +96,7 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
 
   const importPatientTreatments = (targetPatientId: string) => {
     const selectedPatient = patients.find((p) => p.id === targetPatientId);
-    if (selectedPatient && selectedPatient.treatmentPlans.length > 0) {
+    if (selectedPatient && selectedPatient.treatmentPlans && selectedPatient.treatmentPlans.length > 0) {
       const loaded = selectedPatient.treatmentPlans.map((tp, idx) => ({
         id: tp.id || `tp-${idx}`,
         description: tp.procedureName,
@@ -107,6 +107,23 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
       setItems(loaded);
       const totalCost = loaded.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
       setPaidAmount(totalCost);
+    } else if (
+      selectedPatient &&
+      selectedPatient.visitHistory &&
+      selectedPatient.visitHistory.length > 0 &&
+      selectedPatient.visitHistory[0].procedures &&
+      selectedPatient.visitHistory[0].procedures.length > 0
+    ) {
+      const recentVisit = selectedPatient.visitHistory[0];
+      const loaded = recentVisit.procedures.map((proc, idx) => ({
+        id: `proc-${idx}`,
+        description: proc,
+        quantity: 1,
+        unitPrice: 500,
+      }));
+      setItems(loaded.length > 0 ? loaded : [{ id: '1', description: 'Consultation & Dental Examination', quantity: 1, unitPrice: 500 }]);
+      const totalCost = loaded.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+      setPaidAmount(totalCost || 500);
     } else {
       setItems([
         { id: '1', description: 'Consultation & Dental Examination', quantity: 1, unitPrice: 500 },
@@ -210,7 +227,7 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
         <div className="flex items-center justify-between border-b border-[#E8ECF3] pb-4 shrink-0">
           <div className="flex items-center gap-2.5 text-[#3BA7F5] font-extrabold text-base sm:text-lg">
             <Receipt className="w-5 h-5 text-[#3BA7F5]" />
-            <span>Create Clinical Billing Invoice</span>
+            <span>Bill Invoice</span>
           </div>
           <button onClick={onClose} className="p-2 text-[#94A3B8] hover:text-[#1E293B] hover:bg-slate-100 rounded-full transition-colors cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center">
             <X className="w-5 h-5" />
@@ -229,7 +246,7 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
               >
                 {patients.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.name} ({p.mrn} - {p.phone})
+                    {p.name} ({formatPatientId(p)} - {p.phone})
                   </option>
                 ))}
               </select>
@@ -344,7 +361,7 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
                   className="px-3.5 py-1.5 min-h-[36px] bg-[#3BA7F5] hover:bg-[#2A96E4] text-white rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 shrink-0 self-start sm:self-auto shadow-2xs"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  <span>+ Add Custom Bill Template</span>
+                  <span>Add Custom Bill Template</span>
                 </button>
               </div>
 
@@ -551,7 +568,7 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
               type="submit"
               className="px-6 py-3 min-h-[44px] rounded-full bg-[#3BA7F5] hover:bg-[#2A96E4] text-white font-bold shadow-[0_8px_20px_rgba(59,167,245,0.3)] transition-all cursor-pointer"
             >
-              Generate Invoice & Record Payment
+              Save
             </button>
           </div>
         </form>

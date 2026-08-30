@@ -196,11 +196,11 @@ export async function checkTextBeeHealthDirect(params: {
   }
 }
 
-// Get active credentials from localStorage or environment variables
+// Get active credentials from localStorage or environment variables (used for fallback or admin setup)
 function getActiveCredentials(): { deviceId: string; apiKey: string; settings: StoredSmsGatewaySettings | null } {
   const stored = getStoredSmsGatewaySettings();
-  const envDeviceId = (import.meta as any).env?.VITE_TEXTBEE_DEVICE_ID || '';
-  const envApiKey = (import.meta as any).env?.VITE_TEXTBEE_API_KEY || '';
+  const envDeviceId = (import.meta as any).env?.VITE_TEXTBEE_DEVICE_ID || (import.meta as any).env?.TEXTBEE_DEVICE_ID || '';
+  const envApiKey = (import.meta as any).env?.VITE_TEXTBEE_API_KEY || (import.meta as any).env?.TEXTBEE_API_KEY || '';
 
   const deviceId = stored?.deviceId || envDeviceId;
   const apiKey = stored?.apiKey || envApiKey;
@@ -213,21 +213,86 @@ function getActiveCredentials(): { deviceId: string; apiKey: string; settings: S
 }
 
 export async function connectSmsGateway(params: {
-  deviceId: string;
+  deviceId?: string;
+  clientId?: string;
   apiKey: string;
   clinicName?: string;
   clinicPhone?: string;
   doctorName?: string;
   defaultReminderTiming?: string;
 }) {
+  const effectiveDeviceId = (params.deviceId || params.clientId || '').trim();
+  const effectiveApiKey = (params.apiKey || '').trim();
+
+  if (!effectiveDeviceId) {
+    throw new Error('TextBee Client ID is required');
+  }
+  if (!effectiveApiKey) {
+    throw new Error('TextBee API Key is required');
+  }
+
+  // 1. Try connecting via MediCare backend API
+  try {
+    const response = await fetch('/api/sms/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deviceId: effectiveDeviceId,
+        clientId: effectiveDeviceId,
+        apiKey: effectiveApiKey,
+        clinicName: params.clinicName,
+        clinicPhone: params.clinicPhone,
+        doctorName: params.doctorName,
+        defaultReminderTiming: params.defaultReminderTiming,
+      }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      // Also update local storage cache for backup sync
+      const updatedSettings: StoredSmsGatewaySettings = {
+        deviceId: effectiveDeviceId,
+        apiKey: effectiveApiKey,
+        clinicName: params.clinicName || 'RK Dental Clinic',
+        clinicPhone: params.clinicPhone || '+91 9876543210',
+        doctorName: params.doctorName || 'Dr. Alex Mercer',
+        defaultReminderTiming: (params.defaultReminderTiming as any) || '1 day before',
+        connected: true,
+      };
+      saveStoredSmsGatewaySettings(updatedSettings);
+
+      performSupabaseCloudBackup().catch((err) =>
+        console.warn('[SMS Gateway] Notice on cloud backup sync:', err)
+      );
+
+      return {
+        success: true,
+        message: 'TextBee Gateway connected successfully! Credentials saved securely.',
+        settings: data.settings || getPublicSettings(updatedSettings),
+        health: data.health || { isOnline: true },
+      };
+    } else {
+      const errData = await response.json().catch(() => ({}));
+      if (errData.error?.includes('Unauthorized') || response.status === 401) {
+        throw new Error('Invalid TextBee API Key or Device Unauthorized');
+      }
+    }
+  } catch (backendErr: any) {
+    if (backendErr.message?.includes('Invalid TextBee API Key')) {
+      throw backendErr;
+    }
+    console.warn('[SMS API] Backend connect notice, testing direct:', backendErr);
+  }
+
+  // Direct check & fallback
   const health = await checkTextBeeHealthDirect({
-    deviceId: params.deviceId,
-    apiKey: params.apiKey,
+    deviceId: effectiveDeviceId,
+    apiKey: effectiveApiKey,
   });
 
   const updatedSettings: StoredSmsGatewaySettings = {
-    deviceId: params.deviceId.trim(),
-    apiKey: params.apiKey.trim(),
+    deviceId: effectiveDeviceId,
+    apiKey: effectiveApiKey,
     clinicName: params.clinicName || 'RK Dental Clinic',
     clinicPhone: params.clinicPhone || '+91 9876543210',
     doctorName: params.doctorName || 'Dr. Alex Mercer',
@@ -237,7 +302,6 @@ export async function connectSmsGateway(params: {
 
   saveStoredSmsGatewaySettings(updatedSettings);
 
-  // Sync to Supabase Cloud Backup
   performSupabaseCloudBackup().catch((err) =>
     console.warn('[SMS Gateway] Notice on cloud backup sync:', err)
   );
@@ -245,23 +309,47 @@ export async function connectSmsGateway(params: {
   return {
     success: true,
     message: health.isOnline
-      ? 'TextBee Gateway connected successfully via Direct TextBee API!'
+      ? 'TextBee Gateway connected successfully!'
       : 'Credentials saved! Gateway is ready to send SMS.',
     settings: getPublicSettings(updatedSettings),
+    health,
   };
 }
 
 export async function disconnectSmsGateway() {
+  try {
+    await fetch('/api/sms/disconnect', { method: 'POST' });
+  } catch {
+    // ignore
+  }
+
   saveStoredSmsGatewaySettings(null);
 
   performSupabaseCloudBackup().catch((err) =>
     console.warn('[SMS Gateway] Notice on cloud backup sync after disconnect:', err)
   );
 
-  return { success: true, message: 'TextBee Gateway disconnected successfully.' };
+  return { 
+    success: true, 
+    message: 'TextBee Gateway disconnected successfully.',
+    settings: getPublicSettings(null) 
+  };
 }
 
 export async function autoRestoreSmsSettingsIfNeeded() {
+  // First check backend status
+  try {
+    const res = await fetch('/api/sms/status');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.settings?.connected) {
+        return getSmsStatus();
+      }
+    }
+  } catch {
+    // fallback
+  }
+
   const { deviceId, apiKey, settings } = getActiveCredentials();
   if (deviceId && apiKey) {
     if (!settings || !settings.connected) {
@@ -274,6 +362,13 @@ export async function autoRestoreSmsSettingsIfNeeded() {
         defaultReminderTiming: settings?.defaultReminderTiming || '1 day before',
         connected: true,
       });
+
+      // Also restore to backend
+      fetch('/api/sms/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceId, apiKey }),
+      }).catch(() => {});
     }
   }
   return getSmsStatus();
@@ -282,7 +377,7 @@ export async function autoRestoreSmsSettingsIfNeeded() {
 function getPublicSettings(settings: StoredSmsGatewaySettings | null): SmsPublicSettings {
   const deviceId = settings?.deviceId || '';
   const apiKey = settings?.apiKey || '';
-  const maskedApiKey = apiKey ? apiKey.substring(0, 4) + '...' + apiKey.slice(-4) : '';
+  const maskedApiKey = apiKey ? apiKey.substring(0, 4) + '••••••••' + apiKey.slice(-4) : '';
 
   return {
     deviceId,
@@ -301,10 +396,38 @@ function getPublicSettings(settings: StoredSmsGatewaySettings | null): SmsPublic
 }
 
 export async function getSmsStatus() {
+  // 1. Check live status from MediCare Backend
+  try {
+    const response = await fetch('/api/sms/status');
+    if (response.ok) {
+      const data = await response.json();
+      if (data.settings) {
+        return {
+          settings: data.settings,
+          health: data.health || { isOnline: data.settings.connected },
+          counts: data.counts || {
+            todayTotal: 0,
+            todaySent: 0,
+            todayFailed: 0,
+            todayPending: 0,
+            monthlySent: 0,
+          },
+        };
+      }
+    }
+  } catch (e) {
+    console.info('[SMS Status] Backend status check offline, falling back to cached state.');
+  }
+
+  // 2. Fallback to client state
   const { deviceId, apiKey, settings } = getActiveCredentials();
   const publicSettings = getPublicSettings(settings);
 
-  let health = { isOnline: false, deviceName: '', error: 'Gateway credentials missing' };
+  let health: { isOnline: boolean; deviceName?: string; error?: string } = {
+    isOnline: false,
+    deviceName: '',
+    error: 'Gateway credentials missing',
+  };
   if (deviceId && apiKey) {
     health = await checkTextBeeHealthDirect({ deviceId, apiKey });
   }
@@ -312,11 +435,18 @@ export async function getSmsStatus() {
   return {
     settings: publicSettings,
     health,
+    counts: {
+      todayTotal: 0,
+      todaySent: 0,
+      todayFailed: 0,
+      todayPending: 0,
+      monthlySent: 0,
+    },
   };
 }
 
 export async function sendTestSms(recipientPhone: string, message?: string) {
-  const defaultMsg = 'Test SMS from FABIS MediCare Dental EMR. TextBee Direct API Gateway is active & working!';
+  const defaultMsg = 'Test SMS from FABIS MediCare Dental EMR. TextBee API Gateway is active & working!';
   return sendManualSms({
     recipientPhone,
     message: message || defaultMsg,
@@ -331,35 +461,79 @@ export async function sendManualSms(params: {
   message: string;
   type?: 'Appointment' | 'Follow-up' | 'Manual' | 'Recall' | 'Test';
 }) {
-  const { deviceId, apiKey } = getActiveCredentials();
-
-  if (!deviceId || !apiKey) {
-    throw new Error('TextBee Gateway is not connected. Please enter Device ID and API Key in Gateway Integration Settings.');
+  const normalizedPhone = normalizePhoneNumber(params.recipientPhone);
+  if (!isValidPhoneNumber(normalizedPhone)) {
+    throw new Error(`Invalid recipient phone number: "${params.recipientPhone}". Please provide a valid mobile number.`);
   }
 
-  const result = await sendTextBeeSmsDirect({
-    deviceId,
-    apiKey,
-    recipientPhone: params.recipientPhone,
-    message: params.message,
-  });
+  let sendSuccess = false;
+  let textbeeMessageId: string | undefined;
+  let sendError: string | undefined;
+
+  // 1. Try sending via MediCare Backend Proxy (Secure Server Flow)
+  try {
+    const backendRes = await fetch('/api/sms/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        patientId: params.patientId || 'GENERAL',
+        patientName: params.patientName || 'Patient',
+        recipientPhone: normalizedPhone,
+        message: params.message.trim(),
+        type: params.type || 'Manual',
+      }),
+    });
+
+    const data = await backendRes.json().catch(() => ({}));
+
+    if (backendRes.ok && data.success) {
+      sendSuccess = true;
+      textbeeMessageId = data.messageId || data.logId;
+    } else {
+      sendError = data.error || 'Message could not be sent. Please check TextBee connection.';
+    }
+  } catch (netErr: any) {
+    console.warn('[SMS API] Backend proxy error, attempting direct client fallback:', netErr);
+  }
+
+  // 2. Fallback to direct client API if backend was unreachable but credentials exist locally
+  if (!sendSuccess && !sendError) {
+    const { deviceId, apiKey } = getActiveCredentials();
+    if (deviceId && apiKey) {
+      const result = await sendTextBeeSmsDirect({
+        deviceId,
+        apiKey,
+        recipientPhone: normalizedPhone,
+        message: params.message,
+      });
+
+      if (result.success) {
+        sendSuccess = true;
+        textbeeMessageId = result.messageId;
+      } else {
+        sendError = result.error || 'Message could not be sent. Please check TextBee connection.';
+      }
+    } else {
+      sendError = 'Message could not be sent. Please check TextBee connection.';
+    }
+  }
 
   const now = new Date().toISOString();
   const newLog: SmsLogRecord = {
     id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
     patientId: params.patientId || 'GENERAL',
     patientName: params.patientName || 'General Recipient',
-    recipient: normalizePhoneNumber(params.recipientPhone),
+    recipient: normalizedPhone,
     message: params.message,
     type: params.type || 'Manual',
-    status: result.success ? 'Sent' : 'Failed',
-    textbeeMessageId: result.messageId,
-    error: result.error,
-    sentAt: result.success ? now : undefined,
+    status: sendSuccess ? 'Sent' : 'Failed',
+    textbeeMessageId,
+    error: sendSuccess ? undefined : sendError,
+    sentAt: sendSuccess ? now : undefined,
     createdAt: now,
   };
 
-  // Add to local storage
+  // Add to local storage logs
   const currentLogs = getStoredSmsLogs();
   const updatedLogs = [newLog, ...currentLogs];
   saveStoredSmsLogs(updatedLogs);
@@ -367,15 +541,16 @@ export async function sendManualSms(params: {
   // Sync with Supabase Cloud Backup
   performSupabaseCloudBackup().catch(() => {});
 
-  if (!result.success) {
-    throw new Error(result.error || 'Failed to send SMS via TextBee API');
+  if (!sendSuccess) {
+    // Standard friendly error message as specified by user
+    throw new Error('Message could not be sent. Please check TextBee connection.');
   }
 
   return {
     success: true,
-    message: `SMS sent successfully via TextBee API to ${normalizePhoneNumber(params.recipientPhone)}`,
+    message: `SMS sent successfully to ${normalizedPhone}`,
     logId: newLog.id,
-    textbeeMessageId: result.messageId,
+    textbeeMessageId,
   };
 }
 

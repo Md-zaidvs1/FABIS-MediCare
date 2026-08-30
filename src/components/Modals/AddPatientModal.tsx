@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Patient, Gender } from '../../types';
+import { formatPatientId } from '../../utils/formatters';
 import { UserPlus, X, AlertTriangle, UserCheck } from 'lucide-react';
 
 interface AddPatientModalProps {
@@ -40,7 +41,7 @@ export const AddPatientModal: React.FC<AddPatientModalProps> = ({
       const pPhoneClean = p.phone.replace(/\D/g, '');
       const phoneMatch = cleanPhone.length >= 4 && pPhoneClean.includes(cleanPhone);
       const nameMatch = cleanName.length >= 3 && p.name.toLowerCase().includes(cleanName);
-      const mrnMatch = cleanName.length >= 3 && p.mrn.toLowerCase().includes(cleanName);
+      const mrnMatch = cleanName.length >= 3 && (p.mrn.toLowerCase().includes(cleanName) || (p.id && p.id.toLowerCase().includes(cleanName)));
       return phoneMatch || nameMatch || mrnMatch;
     });
   }, [name, phone, existingPatients]);
@@ -96,16 +97,11 @@ export const AddPatientModal: React.FC<AddPatientModalProps> = ({
         <div className="flex items-center justify-between border-b border-[#E8ECF3] pb-4 shrink-0">
           <div className="flex items-center gap-2.5 text-[#3BA7F5] font-extrabold text-base sm:text-lg">
             <UserPlus className="w-5 h-5 text-[#3BA7F5]" />
-            <span>Add Patient — New Registration</span>
+            <span>New patient registration</span>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="hidden sm:inline-flex px-2.5 py-1 rounded-full text-[11px] font-mono font-bold bg-[#3BA7F5]/10 text-[#2A96E4] border border-[#3BA7F5]/20">
-              ⚡ Auto MRN
-            </span>
-            <button onClick={onClose} className="p-2 text-[#94A3B8] hover:text-[#1E293B] rounded-full hover:bg-slate-100 transition-colors cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
+          <button onClick={onClose} className="p-2 text-[#94A3B8] hover:text-[#1E293B] rounded-full hover:bg-slate-100 transition-colors cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center">
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
         {/* Form with Flex Scrollable Body & Sticky Footer */}
@@ -134,7 +130,7 @@ export const AddPatientModal: React.FC<AddPatientModalProps> = ({
                     >
                       <div>
                         <div className="font-bold text-slate-900 text-sm">
-                          {ep.name} <span className="text-xs font-mono font-bold text-sky-600">({ep.mrn})</span>
+                          {ep.name} <span className="text-xs font-mono font-bold text-sky-600">({formatPatientId(ep)})</span>
                         </div>
                         <div className="text-xs text-slate-600 flex flex-wrap gap-x-3 gap-y-0.5 font-medium mt-0.5">
                           <span>📱 {ep.phone}</span>
@@ -163,7 +159,7 @@ export const AddPatientModal: React.FC<AddPatientModalProps> = ({
             )}
 
             <div>
-              <label className="text-[#1E293B] font-bold block mb-1.5">Full Patient Name *</label>
+              <label className="text-[#1E293B] font-bold block mb-1.5">Patient Name *</label>
               <input
                 type="text"
                 required
@@ -220,7 +216,7 @@ export const AddPatientModal: React.FC<AddPatientModalProps> = ({
             </div>
 
             <div>
-              <label className="text-[#1E293B] font-bold block mb-1.5">Mobile Phone *</label>
+              <label className="text-[#1E293B] font-bold block mb-1.5">Mobile No *</label>
               <input
                 type="text"
                 inputMode="tel"
@@ -293,7 +289,7 @@ export const AddPatientModal: React.FC<AddPatientModalProps> = ({
               type="submit"
               className="px-6 py-3 min-h-[44px] rounded-full bg-[#3BA7F5] hover:bg-[#2A96E4] text-white font-bold shadow-[0_8px_20px_rgba(59,167,245,0.3)] transition-all cursor-pointer"
             >
-              Save Patient (Auto Generate MRN)
+              Save
             </button>
           </div>
         </form>

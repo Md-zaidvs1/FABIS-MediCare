@@ -8,10 +8,11 @@ export const smsRouter = Router();
 // 1. CONNECT GATEWAY
 smsRouter.post('/connect', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { deviceId, apiKey, clinicName, clinicPhone, doctorName, defaultReminderTiming } = req.body;
+    const { deviceId, clientId, apiKey, clinicName, clinicPhone, doctorName, defaultReminderTiming } = req.body;
+    const effectiveDeviceId = (deviceId || clientId || '').trim();
 
-    if (!deviceId || !deviceId.trim()) {
-      res.status(400).json({ success: false, error: 'TextBee Device ID is required' });
+    if (!effectiveDeviceId) {
+      res.status(400).json({ success: false, error: 'TextBee Client ID / Device ID is required' });
       return;
     }
 
@@ -21,7 +22,7 @@ smsRouter.post('/connect', async (req: Request, res: Response): Promise<void> =>
     }
 
     // Ping device API to check validity
-    const health = await checkTextBeeDeviceHealth({ deviceId, apiKey });
+    const health = await checkTextBeeDeviceHealth({ deviceId: effectiveDeviceId, apiKey });
 
     if (!health.isOnline && health.error?.includes('Unauthorized')) {
       res.status(401).json({ success: false, error: 'Invalid TextBee API Key or Device Unauthorized' });
@@ -30,7 +31,7 @@ smsRouter.post('/connect', async (req: Request, res: Response): Promise<void> =>
 
     // Save configuration securely on backend
     const updated = smsStore.updateSettings({
-      deviceId: deviceId.trim(),
+      deviceId: effectiveDeviceId,
       apiKey: apiKey.trim(),
       connected: true,
       deviceName: health.deviceName || 'TextBee Android Gateway',
@@ -45,6 +46,7 @@ smsRouter.post('/connect', async (req: Request, res: Response): Promise<void> =>
       success: true,
       message: 'TextBee Android SMS Gateway connected successfully!',
       settings: smsStore.getPublicSettings(),
+      health,
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || 'Failed to connect TextBee gateway' });

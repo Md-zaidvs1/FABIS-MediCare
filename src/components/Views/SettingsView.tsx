@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { DoctorProfile, UserRole, UserCredentials, ThemePalette, ChairStatus } from '../../types';
+import React, { useState, useEffect, useRef } from 'react';
+import { DoctorProfile, UserRole, UserCredentials, ThemePalette, Patient, Prescription } from '../../types';
 import { 
   getStoredCredentials, 
   saveCredentials, 
@@ -9,9 +9,13 @@ import {
   saveCustomClinicLogo,
   getStoredCustomAppIcon,
   saveCustomAppIcon,
+  getStoredCustomDoctorSignature,
+  saveCustomDoctorSignature,
+  getStoredCustomClinicStamp,
+  saveCustomClinicStamp,
+  getStoredPatients,
+  deletePatientPermanently,
   resetCustomBranding,
-  getStoredChairs,
-  saveStoredChairs
 } from '../../utils/storage';
 import {
   exportEncryptedBackup,
@@ -37,44 +41,50 @@ import {
   ShieldCheck, 
   Building, 
   User, 
-  Lock, 
   Palette, 
   Key, 
   CheckCircle2, 
-  Sparkles,
   LockKeyhole,
   Upload,
   Image as ImageIcon,
   Trash2,
   Database,
+  Smartphone,
   Download,
   UploadCloud,
   FileCheck,
   Clock,
   AlertTriangle,
   Printer,
-  Armchair,
-  Plus,
-  Edit2,
-  Check,
-  FileImage,
   CloudCheck,
   RefreshCw,
   Server,
-  LayoutDashboard,
   Copy,
-  ExternalLink,
   Terminal,
   Code2,
+  Receipt,
+  Globe,
+  PenTool,
+  Eye,
+  FileText,
+  X,
+  Search,
+  UserX,
 } from 'lucide-react';
-import { PrintDesignerModule } from '../PrintDesigner/PrintDesignerModule';
-import { DashboardPersonalizationSection } from '../Settings/DashboardPersonalizationSection';
 import { SmsIntegrationSettings } from '../Settings/SmsIntegrationSettings';
 import {
   performSupabaseCloudBackup,
   restoreFromSupabaseCloud,
   getStoredCloudSyncTime,
 } from '../../utils/supabaseCloudBackup';
+import { generatePrescriptionJsPdf } from '../../utils/jsPdfPrescriptionGenerator';
+import { printPdfBlob } from '../../utils/pdfShare';
+import {
+  evaluateSoftwareAccess,
+  setDoctorAccessStatus,
+  setMaintenanceModeStatus,
+  SoftwareAccessState,
+} from '../../utils/softwareLock';
 
 interface SettingsViewProps {
   doctor: DoctorProfile;
@@ -100,13 +110,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [currentTheme, setCurrentTheme] = useState<ThemePalette>(getStoredTheme());
 
   // Branding State
-  const [clinicLogo, setClinicLogo] = useState<string | null>(getStoredCustomClinicLogo());
+  const [clinicLogo, setClinicLogo] = useState<string | null>(getStoredCustomClinicLogo() || doctor.logoUrl || null);
   const [appIcon, setAppIcon] = useState<string | null>(getStoredCustomAppIcon());
+  const [doctorSignature, setDoctorSignature] = useState<string | null>(getStoredCustomDoctorSignature() || doctor.signatureUrl || null);
+  const [clinicStamp, setClinicStamp] = useState<string | null>(getStoredCustomClinicStamp() || doctor.stampUrl || null);
   const [brandingSavedSuccess, setBrandingSavedSuccess] = useState(false);
 
-  // Data Protection & Backup State
-  const [activeSection, setActiveSection] = useState<'profile' | 'chairs' | 'dashboard' | 'print' | 'backup' | 'sms'>('profile');
+  // Active Tab State
+  const [activeSection, setActiveSection] = useState<'profile' | 'sms' | 'backup' | 'admin'>('profile');
 
+  // Signature Canvas State
+  const [isDrawingSignature, setIsDrawingSignature] = useState(false);
+  const sigCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [hasCanvasDrawn, setHasCanvasDrawn] = useState(false);
+
+  // Backup & Sync State
   const [backupFreq, setBackupFreq] = useState<BackupFrequency>(getBackupReminderFrequency());
   const [lastBackup, setLastBackup] = useState<string | null>(getLastBackupTimestamp());
   const [lastCloudSync, setLastCloudSync] = useState<string | null>(getStoredCloudSyncTime());
@@ -117,27 +135,60 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [restoreSuccess, setRestoreSuccess] = useState<string | null>(null);
 
-  // Chair Management State
-  const [configuredChairs, setConfiguredChairs] = useState<ChairStatus[]>(getStoredChairs());
-  const [newChairName, setNewChairName] = useState('');
-  const [editingChairId, setEditingChairId] = useState<string | null>(null);
-  const [editingChairName, setEditingChairName] = useState('');
-  const [chairNotice, setChairNotice] = useState<string | null>(null);
-
   // Supabase Custom Config State
   const [supabaseConfig, setSupabaseConfig] = useState(getStoredSupabaseConfig());
   const [supabaseUrlInput, setSupabaseUrlInput] = useState(supabaseConfig.url);
   const [supabaseKeyInput, setSupabaseKeyInput] = useState(supabaseConfig.anonKey);
   const [supabaseTestResult, setSupabaseTestResult] = useState<any>(null);
   const [isTestingSupabase, setIsTestingSupabase] = useState(false);
-  const [showSqlSchemaModal, setShowSqlSchemaModal] = useState(false);
-  const [copiedSql, setCopiedSql] = useState(false);
+
+  // Patient Deletion State (Admin Only)
+  const [patientsList, setPatientsList] = useState<Patient[]>([]);
+  const [patientSearchTerm, setPatientSearchTerm] = useState('');
+  const [selectedPatientToDelete, setSelectedPatientToDelete] = useState<Patient | null>(null);
+  const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
+  const [isDeletingPatient, setIsDeletingPatient] = useState(false);
+  const [deletionSuccessMessage, setDeletionSuccessMessage] = useState<string | null>(null);
+  const [deletionErrorMessage, setDeletionErrorMessage] = useState<string | null>(null);
+
+  // Software Access & Service Lock State (Admin Only)
+  const [softwareAccess, setSoftwareAccess] = useState<SoftwareAccessState | null>(null);
+  const [isUpdatingLock, setIsUpdatingLock] = useState(false);
+  const [lockStatusMessage, setLockStatusMessage] = useState<string | null>(null);
+  const [showLockConfirmModal, setShowLockConfirmModal] = useState(false);
+
+  const loadSoftwareAccessStatus = async () => {
+    try {
+      const state = await evaluateSoftwareAccess();
+      setSoftwareAccess(state);
+    } catch (e) {
+      console.warn('Error evaluating software access:', e);
+    }
+  };
+
+  useEffect(() => {
+    setFormData(doctor);
+    if (doctor.logoUrl) setClinicLogo(doctor.logoUrl);
+    if (doctor.signatureUrl) setDoctorSignature(doctor.signatureUrl);
+    if (doctor.stampUrl) setClinicStamp(doctor.stampUrl);
+  }, [doctor]);
+
+  const loadPatients = () => {
+    try {
+      const pts = getStoredPatients();
+      setPatientsList(pts);
+    } catch (e) {
+      console.warn('Error loading patients:', e);
+    }
+  };
 
   useEffect(() => {
     setCredentials(getStoredCredentials());
     setCurrentTheme(getStoredTheme());
-    setClinicLogo(getStoredCustomClinicLogo());
+    setClinicLogo(getStoredCustomClinicLogo() || doctor.logoUrl || null);
     setAppIcon(getStoredCustomAppIcon());
+    setDoctorSignature(getStoredCustomDoctorSignature() || doctor.signatureUrl || null);
+    setClinicStamp(getStoredCustomClinicStamp() || doctor.stampUrl || null);
     setBackupFreq(getBackupReminderFrequency());
     setLastBackup(getLastBackupTimestamp());
     setLastCloudSync(getStoredCloudSyncTime());
@@ -147,6 +198,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setSupabaseUrlInput(cfg.url);
     setSupabaseKeyInput(cfg.anonKey);
     testSupabaseConnection().then(setSupabaseTestResult);
+
+    loadPatients();
+    loadSoftwareAccessStatus();
+
+    const handleLicenseEvent = () => loadSoftwareAccessStatus();
+    window.addEventListener('software-license-updated', handleLicenseEvent);
+    return () => window.removeEventListener('software-license-updated', handleLicenseEvent);
   }, []);
 
   const handleManualCloudBackup = async () => {
@@ -185,13 +243,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setIsTestingSupabase(false);
   };
 
-  const handleCopySqlSchema = () => {
-    const sql = getRequiredSupabaseSqlSchema();
-    navigator.clipboard.writeText(sql);
-    setCopiedSql(true);
-    setTimeout(() => setCopiedSql(false), 3000);
-  };
-
   const handleRestoreFromCloud = async () => {
     if (activeRole !== 'admin') return;
     setIsCloudSyncing(true);
@@ -223,11 +274,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     } catch (err: any) {
       alert('Failed to export backup: ' + (err.message || 'Unknown error'));
     }
-  };
-
-  const handleBackupFreqChange = (freq: BackupFrequency) => {
-    setBackupFreq(freq);
-    saveBackupReminderFrequency(freq);
   };
 
   const handleRestoreFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -264,7 +310,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'clinicLogo' | 'appIcon') => {
+  const handleFileUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>, 
+    type: 'clinicLogo' | 'appIcon' | 'doctorSignature' | 'clinicStamp'
+  ) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -274,7 +323,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       return;
     }
 
-    // Try multi-tenant Supabase storage upload ({clinic_id}/logos/{filename})
+    // Try multi-tenant Supabase storage upload
     try {
       const { uploadClinicFile } = await import('../../utils/supabaseMultiTenant');
       const uploaded = await uploadClinicFile(file, 'logos', undefined, doctor);
@@ -282,17 +331,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         if (type === 'clinicLogo') {
           setClinicLogo(uploaded.url);
           saveCustomClinicLogo(uploaded.url);
-        } else {
+          setFormData(prev => ({ ...prev, logoUrl: uploaded.url }));
+        } else if (type === 'appIcon') {
           setAppIcon(uploaded.url);
           saveCustomAppIcon(uploaded.url);
+        } else if (type === 'doctorSignature') {
+          setDoctorSignature(uploaded.url);
+          saveCustomDoctorSignature(uploaded.url);
+          setFormData(prev => ({ ...prev, signatureUrl: uploaded.url }));
+        } else if (type === 'clinicStamp') {
+          setClinicStamp(uploaded.url);
+          saveCustomClinicStamp(uploaded.url);
+          setFormData(prev => ({ ...prev, stampUrl: uploaded.url }));
         }
         setBrandingSavedSuccess(true);
         setTimeout(() => setBrandingSavedSuccess(false), 3000);
         window.dispatchEvent(new Event('custom-branding-updated'));
+        window.dispatchEvent(new Event('doctor-profile-updated'));
         return;
       }
     } catch (sbErr) {
-      console.info('Supabase storage fallback to local Base64 branding:', sbErr);
+      console.info('Supabase storage fallback to local Base64:', sbErr);
     }
 
     // Local Base64 fallback
@@ -302,42 +361,117 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       if (type === 'clinicLogo') {
         setClinicLogo(base64);
         saveCustomClinicLogo(base64);
-      } else {
+        setFormData(prev => ({ ...prev, logoUrl: base64 }));
+      } else if (type === 'appIcon') {
         setAppIcon(base64);
         saveCustomAppIcon(base64);
+      } else if (type === 'doctorSignature') {
+        setDoctorSignature(base64);
+        saveCustomDoctorSignature(base64);
+        setFormData(prev => ({ ...prev, signatureUrl: base64 }));
+      } else if (type === 'clinicStamp') {
+        setClinicStamp(base64);
+        saveCustomClinicStamp(base64);
+        setFormData(prev => ({ ...prev, stampUrl: base64 }));
       }
       setBrandingSavedSuccess(true);
       setTimeout(() => setBrandingSavedSuccess(false), 3000);
       window.dispatchEvent(new Event('custom-branding-updated'));
+      window.dispatchEvent(new Event('doctor-profile-updated'));
     };
     reader.readAsDataURL(file);
   };
 
-  const handleRemoveLogo = (type: 'clinicLogo' | 'appIcon') => {
+  const handleRemoveAsset = (type: 'clinicLogo' | 'appIcon' | 'doctorSignature' | 'clinicStamp') => {
     if (type === 'clinicLogo') {
       setClinicLogo(null);
       saveCustomClinicLogo(null);
-    } else {
+      setFormData(prev => ({ ...prev, logoUrl: undefined }));
+    } else if (type === 'appIcon') {
       setAppIcon(null);
       saveCustomAppIcon(null);
+    } else if (type === 'doctorSignature') {
+      setDoctorSignature(null);
+      saveCustomDoctorSignature(null);
+      setFormData(prev => ({ ...prev, signatureUrl: undefined }));
+    } else if (type === 'clinicStamp') {
+      setClinicStamp(null);
+      saveCustomClinicStamp(null);
+      setFormData(prev => ({ ...prev, stampUrl: undefined }));
     }
     setBrandingSavedSuccess(true);
     setTimeout(() => setBrandingSavedSuccess(false), 3000);
     window.dispatchEvent(new Event('custom-branding-updated'));
+    window.dispatchEvent(new Event('doctor-profile-updated'));
   };
 
-  const handleResetBranding = () => {
-    resetCustomBranding();
-    setClinicLogo(null);
-    setAppIcon(null);
+  // Canvas signature drawing functions
+  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    const canvas = sigCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    setIsDrawingSignature(true);
+    setHasCanvasDrawn(true);
+    const rect = canvas.getBoundingClientRect();
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    ctx.beginPath();
+    ctx.moveTo(clientX - rect.left, clientY - rect.top);
+  };
+
+  const drawSignature = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    if (!isDrawingSignature) return;
+    const canvas = sigCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#0F172A';
+    ctx.lineTo(clientX - rect.left, clientY - rect.top);
+    ctx.stroke();
+  };
+
+  const stopDrawing = () => {
+    setIsDrawingSignature(false);
+  };
+
+  const clearCanvasSignature = () => {
+    const canvas = sigCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setHasCanvasDrawn(false);
+  };
+
+  const saveCanvasSignature = () => {
+    const canvas = sigCanvasRef.current;
+    if (!canvas) return;
+    const base64 = canvas.toDataURL('image/png');
+    setDoctorSignature(base64);
+    saveCustomDoctorSignature(base64);
+    setFormData(prev => ({ ...prev, signatureUrl: base64 }));
     setBrandingSavedSuccess(true);
     setTimeout(() => setBrandingSavedSuccess(false), 3000);
-    window.dispatchEvent(new Event('custom-branding-updated'));
+    window.dispatchEvent(new Event('doctor-profile-updated'));
   };
 
   const handleProfileSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSaveDoctor(formData);
+    const updatedDoctor: DoctorProfile = {
+      ...formData,
+      logoUrl: clinicLogo || undefined,
+      signatureUrl: doctorSignature || undefined,
+      stampUrl: clinicStamp || undefined,
+    };
+    onSaveDoctor(updatedDoctor);
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
   };
@@ -354,111 +488,182 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     saveStoredTheme(theme);
   };
 
-  const handleSetSingleChairPreset = () => {
-    const singleChair: ChairStatus[] = [
-      {
-        id: 'Chair 1 (Main Operatory)',
-        name: 'Chair 1 - Main Operatory',
-        status: 'Available',
-      },
-    ];
-    setConfiguredChairs(singleChair);
-    saveStoredChairs(singleChair);
-    setChairNotice('Set to 1 Chair (Single Operatory Clinic) successfully!');
-    setTimeout(() => setChairNotice(null), 3000);
+  // Preview Sample Prescription PDF
+  const handlePreviewSamplePrescription = () => {
+    try {
+      const sampleDoctor: DoctorProfile = {
+        ...formData,
+        logoUrl: clinicLogo || undefined,
+        signatureUrl: doctorSignature || undefined,
+        stampUrl: clinicStamp || undefined,
+      };
+
+      const samplePatient: Patient = {
+        id: 'PREVIEW_SAMPLE',
+        mrn: 'FM-SAMPLE-001',
+        name: 'Mr. Rajesh Kumar',
+        age: 38,
+        gender: 'Male',
+        phone: '+91 98765 43210',
+        status: 'Active',
+        medicalHistory: {
+          systemicConditions: [],
+          currentMedications: [],
+          allergies: ['None'],
+          bleedingDisorder: false,
+          notes: 'Routine dental checkup',
+        },
+        teethMap: {},
+        treatmentPlans: [],
+        prescriptions: [],
+        invoices: [],
+        appointments: [],
+        followUps: [],
+        media: [],
+        createdAt: new Date().toISOString(),
+      };
+
+      const samplePrescription: Prescription = {
+        id: 'RX-PREVIEW-001',
+        patientId: samplePatient.id,
+        doctorName: sampleDoctor.name,
+        chiefComplaint: 'Enamel Sensitivity & Mild Gingival Bleeding',
+        date: new Date().toISOString(),
+        diagnosis: 'Chronic Marginal Gingivitis & Enamel Sensitivity',
+        medicines: [
+          {
+            id: 'm1',
+            name: 'Amoxicillin 500mg Capsule',
+            dosage: '1 cap',
+            frequency: '1-0-1 (Twice daily after meals)',
+            duration: '5 Days',
+            instructions: 'Complete full course. Take after breakfast and dinner.',
+          },
+          {
+            id: 'm2',
+            name: 'Paracetamol 650mg Tablet',
+            dosage: '1 tab',
+            frequency: 'SOS (As needed for mild pain)',
+            duration: '3 Days',
+            instructions: 'Take only if pain or discomfort occurs.',
+          },
+          {
+            id: 'm3',
+            name: 'Chlorhexidine 0.2% Oral Rinse',
+            dosage: '10 ml',
+            frequency: 'Twice daily',
+            duration: '7 Days',
+            instructions: 'Rinse mouth for 30 seconds after brushing. Do not swallow.',
+          },
+        ],
+        specialInstructions: 'Maintain warm saline gargles. Use ultra-soft bristle toothbrush. Avoid direct biting on hard foods for 48 hours.',
+        nextVisitDate: 'After 7 days for follow-up evaluation',
+      };
+
+      const pdfBlob = generatePrescriptionJsPdf(samplePrescription, sampleDoctor, samplePatient);
+      printPdfBlob(pdfBlob);
+    } catch (err: any) {
+      alert('Error generating preview PDF: ' + (err.message || 'Unknown error'));
+    }
   };
 
-  const handleAddChair = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newChairName.trim()) return;
-    const chairNum = configuredChairs.length + 1;
-    const newId = `Chair ${chairNum} (${newChairName.trim()})`;
-    const updated = [
-      ...configuredChairs,
-      {
-        id: newId,
-        name: `Chair ${chairNum} - ${newChairName.trim()}`,
-        status: 'Available' as const,
-      },
-    ];
-    setConfiguredChairs(updated);
-    saveStoredChairs(updated);
-    setNewChairName('');
-    setChairNotice(`Added "${newChairName.trim()}" successfully! Live Dashboard updated.`);
-    setTimeout(() => setChairNotice(null), 3000);
-  };
+  // Permanent Patient Deletion Handler
+  const handleExecutePermanentDelete = async () => {
+    if (!selectedPatientToDelete) return;
+    const requiredConfirmation = selectedPatientToDelete.mrn || selectedPatientToDelete.name;
+    const inputClean = deleteConfirmInput.trim().toUpperCase();
 
-  const handleDeleteChair = (chairId: string) => {
-    if (configuredChairs.length <= 1) {
-      alert('You must keep at least 1 dental chair configured for your clinic.');
+    if (inputClean !== requiredConfirmation.toUpperCase() && inputClean !== 'DELETE') {
+      setDeletionErrorMessage(`Please type "${requiredConfirmation}" or "DELETE" to confirm permanent deletion.`);
       return;
     }
-    const updated = configuredChairs.filter((c) => c.id !== chairId);
-    setConfiguredChairs(updated);
-    saveStoredChairs(updated);
-    setChairNotice('Chair deleted successfully! Live Dashboard updated.');
-    setTimeout(() => setChairNotice(null), 3000);
+
+    setIsDeletingPatient(true);
+    setDeletionErrorMessage(null);
+    setDeletionSuccessMessage(null);
+
+    try {
+      const ok = await deletePatientPermanently(selectedPatientToDelete.id);
+      if (ok) {
+        setDeletionSuccessMessage(`✓ Patient ${selectedPatientToDelete.name} (${selectedPatientToDelete.mrn}) was permanently deleted.`);
+        setSelectedPatientToDelete(null);
+        setDeleteConfirmInput('');
+        loadPatients();
+        window.dispatchEvent(new Event('patients-updated'));
+      } else {
+        setDeletionErrorMessage('Failed to delete patient record. Please check permissions.');
+      }
+    } catch (err: any) {
+      setDeletionErrorMessage('Deletion failed: ' + (err.message || 'Unknown error'));
+    } finally {
+      setIsDeletingPatient(false);
+    }
   };
 
-  const handleStartRename = (c: ChairStatus) => {
-    setEditingChairId(c.id);
-    setEditingChairName(c.name);
-  };
-
-  const handleSaveRename = (chairId: string) => {
-    if (!editingChairName.trim()) return;
-    const updated = configuredChairs.map((c) =>
-      c.id === chairId ? { ...c, name: editingChairName.trim() } : c
-    );
-    setConfiguredChairs(updated);
-    saveStoredChairs(updated);
-    setEditingChairId(null);
-    setChairNotice('Chair renamed successfully!');
-    setTimeout(() => setChairNotice(null), 3000);
-  };
-
-  const themeOptions: { id: ThemePalette; name: string; desc: string; primary: string; accent: string; bg: string }[] = [
+  // Clean Curated Clinical Themes
+  const themeOptions: { 
+    id: ThemePalette; 
+    name: string; 
+    desc: string; 
+    primary: string; 
+    accent: string; 
+    light: string;
+  }[] = [
+    {
+      id: 'lavender-dream',
+      name: 'Lavender Dream',
+      desc: 'Soft Purple & Pastel Harmony',
+      primary: '#6345B5',
+      accent: '#B794E6',
+      light: '#EBD8F7',
+    },
+    {
+      id: 'ocean-breeze',
+      name: 'Ocean Breeze',
+      desc: 'Fresh Blue & Aqua Clinical',
+      primary: '#1C58BA',
+      accent: '#42B4F8',
+      light: '#A3E4D7',
+    },
     {
       id: 'royal-navy',
-      name: 'Royal Navy & Teal',
-      desc: 'Executive Classic',
-      primary: '#1e3a8a',
-      accent: '#0d9488',
-      bg: '#f8fafc',
+      name: 'Royal Navy / Violet',
+      desc: 'Royal Indigo & Sky Blue',
+      primary: '#5B4CF0',
+      accent: '#3BA7F5',
+      light: '#DCE6FC',
     },
     {
-      id: 'emerald-gold',
-      name: 'Emerald Gold',
-      desc: 'Luxury Aesthetic',
-      primary: '#065f46',
-      accent: '#d97706',
-      bg: '#f0fdf4',
+      id: 'emerald-green',
+      name: 'Emerald Clinical',
+      desc: 'Clinical Mint & Forest Green',
+      primary: '#059669',
+      accent: '#10B981',
+      light: '#D1FAE5',
     },
     {
-      id: 'sapphire-ice',
-      name: 'Sapphire Ice',
-      desc: 'Modern Tech',
-      primary: '#1d4ed8',
-      accent: '#0891b2',
-      bg: '#f0f9ff',
-    },
-    {
-      id: 'sage-stone',
-      name: 'Sage & Stone',
-      desc: 'Calming Minimalist',
-      primary: '#475569',
-      accent: '#65a30d',
-      bg: '#f8fafc',
+      id: 'ocean-blue',
+      name: 'Deep Blue',
+      desc: 'Modern Oceanic & Sky Cyan',
+      primary: '#0284C7',
+      accent: '#38BDF8',
+      light: '#E0F2FE',
     },
     {
       id: 'midnight-obsidian',
       name: 'Midnight Obsidian',
-      desc: 'Sleek Dark Mode',
-      primary: '#7c3aed',
-      accent: '#38bdf8',
-      bg: '#090d16',
+      desc: 'Sleek Dark Mode Canvas',
+      primary: '#8B5CF6',
+      accent: '#38BDF8',
+      light: '#334155',
     },
   ];
+
+  const filteredPatients = patientsList.filter(p => 
+    p.name.toLowerCase().includes(patientSearchTerm.toLowerCase()) ||
+    (p.mrn && p.mrn.toLowerCase().includes(patientSearchTerm.toLowerCase())) ||
+    (p.phone && p.phone.includes(patientSearchTerm))
+  );
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -467,10 +672,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div>
           <h2 className="text-xl font-extrabold text-theme-main flex items-center gap-2.5">
             <Settings className="w-6 h-6 text-theme-accent" />
-            <span>FABIS MediCare System Settings</span>
+            <span>Settings & Practice Configuration</span>
           </h2>
-          <p className="text-sm font-medium text-theme-secondary mt-1">
-            Configure letterhead details, credentials manager, master price lists, print template designer, and global theme
+          <p className="text-xs text-theme-secondary font-medium mt-1">
+            Configure clinic identity, official prescription headers, branding, security credentials, and backups.
           </p>
         </div>
 
@@ -495,969 +700,709 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           }`}
         >
           <Building className="w-4 h-4" />
-          <span>Doctor Profile, Branding & Theme</span>
+          <span>Doctor Profile & Prescription PDF</span>
         </button>
 
-        <button
-          type="button"
-          onClick={() => setActiveSection('chairs')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
-            activeSection === 'chairs'
-              ? 'bg-amber-600 text-white shadow-md'
-              : 'bg-theme-card text-theme-secondary hover:text-theme-main border border-theme-border'
-          }`}
-        >
-          <Armchair className="w-4 h-4 text-amber-300" />
-          <span>Dental Chairs & Operatories ({configuredChairs.length})</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveSection('dashboard')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
-            activeSection === 'dashboard'
-              ? 'bg-sky-600 text-white shadow-md'
-              : 'bg-theme-card text-theme-secondary hover:text-theme-main border border-theme-border'
-          }`}
-        >
-          <LayoutDashboard className="w-4 h-4 text-sky-300" />
-          <span>Dashboard Personalization</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveSection('print')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
-            activeSection === 'print'
-              ? 'bg-purple-700 text-white shadow-md'
-              : 'bg-theme-card text-theme-secondary hover:text-theme-main border border-theme-border'
-          }`}
-        >
-          <Printer className="w-4 h-4 text-purple-300" />
-          <span>A4 Invoice & PDF Designer</span>
-        </button>
-
-
-        <button
-          type="button"
-          onClick={() => setActiveSection('sms')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
-            activeSection === 'sms'
-              ? 'bg-emerald-600 text-white shadow-md'
-              : 'bg-theme-card text-theme-secondary hover:text-theme-main border border-theme-border'
-          }`}
-        >
-          <Key className="w-4 h-4 text-emerald-300" />
-          <span>SMS Gateway (TextBee)</span>
-        </button>
+        {/* SMS Gateway Tab is strictly Admin-Only */}
+        {activeRole === 'admin' && (
+          <button
+            type="button"
+            onClick={() => setActiveSection('sms')}
+            className={`px-4 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
+              activeSection === 'sms'
+                ? 'bg-emerald-600 text-white shadow-md'
+                : 'bg-theme-card text-theme-secondary hover:text-theme-main border border-theme-border'
+            }`}
+          >
+            <Smartphone className="w-4 h-4 text-emerald-300" />
+            <span>SMS Gateway (TextBee)</span>
+          </button>
+        )}
 
         <button
           type="button"
           onClick={() => setActiveSection('backup')}
           className={`px-4 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
             activeSection === 'backup'
-              ? 'bg-emerald-700 text-white shadow-md'
+              ? 'bg-indigo-600 text-white shadow-md'
               : 'bg-theme-card text-theme-secondary hover:text-theme-main border border-theme-border'
           }`}
         >
-          <Database className="w-4 h-4 text-emerald-300" />
+          <Database className="w-4 h-4 text-indigo-300" />
           <span>Data Protection & Backups</span>
         </button>
-      </div>
 
-      {/* SMS Settings Section */}
-      {activeSection === 'sms' && (
-        <SmsIntegrationSettings />
-      )}
-
-      {/* Chair Settings View */}
-      {activeSection === 'chairs' && (
-        <div className="bg-theme-card p-6 rounded-[28px] border border-theme-border shadow-[0_10px_30px_rgba(0,0,0,0.03)] space-y-6 text-theme-main">
-          {/* Header */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-theme-border pb-4">
-            <div>
-              <h3 className="text-lg font-black text-theme-main flex items-center gap-2">
-                <Armchair className="w-5 h-5 text-amber-500" />
-                <span>Dental Chair & Operatory Management</span>
-              </h3>
-              <p className="text-xs text-theme-secondary mt-1">
-                Configure the active operatory chairs for this branch. Changes instantly sync to the Dashboard grid and scheduler.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleSetSingleChairPreset}
-              className="px-3.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 text-xs font-extrabold transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
-            >
-              <Check className="w-4 h-4 text-amber-700" />
-              <span>Set to 1 Chair (Single Operatory Clinic)</span>
-            </button>
-          </div>
-
-          {/* Success Notice Banner */}
-          {chairNotice && (
-            <div className="p-3 bg-emerald-50 text-emerald-900 border border-emerald-300 rounded-xl text-xs font-bold flex items-center gap-2 animate-fadeIn">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>{chairNotice}</span>
-            </div>
-          )}
-
-          {/* Active Chairs Grid */}
-          <div className="space-y-3">
-            <h4 className="text-xs font-extrabold text-theme-secondary uppercase tracking-wider">
-              Configured Chairs ({configuredChairs.length})
-            </h4>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {configuredChairs.map((c, index) => (
-                <div
-                  key={c.id}
-                  className="p-4 rounded-2xl border border-theme-border bg-theme-page/60 flex items-center justify-between gap-3 shadow-2xs hover:shadow-xs transition-all"
-                >
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <div className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-200 flex items-center justify-center font-black text-sm shrink-0">
-                      💺
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      {editingChairId === c.id ? (
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            value={editingChairName}
-                            onChange={(e) => setEditingChairName(e.target.value)}
-                            className="px-2 py-1 text-xs font-bold rounded-lg bg-theme-card border border-theme-accent text-theme-main outline-none w-full"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => handleSaveRename(c.id)}
-                            className="p-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer"
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <span className="font-extrabold text-sm text-theme-main truncate">{c.name}</span>
-                          <button
-                            type="button"
-                            onClick={() => handleStartRename(c)}
-                            className="text-theme-secondary hover:text-theme-main p-1 cursor-pointer"
-                            title="Rename Chair"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      )}
-
-                      <div className="flex items-center gap-2 text-[11px] font-mono text-theme-secondary mt-0.5">
-                        <span>ID: {c.id}</span>
-                        <span>•</span>
-                        <span className="text-emerald-700 dark:text-emerald-400 font-bold">Status: {c.status}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Actions: Delete Chair Button */}
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteChair(c.id)}
-                    className="p-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:hover:bg-rose-900/60 dark:text-rose-300 border border-rose-200 dark:border-rose-900 transition-all cursor-pointer shrink-0 flex items-center gap-1 text-xs font-extrabold"
-                    title="Delete this chair"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    <span className="hidden sm:inline">Delete</span>
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Add New Chair Form */}
-          <form onSubmit={handleAddChair} className="pt-4 border-t border-theme-border space-y-3">
-            <h4 className="text-xs font-extrabold text-theme-secondary uppercase tracking-wider">
-              Add New Operatory Chair
-            </h4>
-            <div className="flex flex-col sm:flex-row items-center gap-3">
-              <input
-                type="text"
-                placeholder="e.g. Hygiene & Scaling Chair, Surgical OT 2"
-                value={newChairName}
-                onChange={(e) => setNewChairName(e.target.value)}
-                className="flex-1 w-full px-4 py-2.5 rounded-xl bg-theme-page border border-theme-border text-theme-main text-xs font-bold outline-none focus:border-theme-accent"
-              />
-              <button
-                type="submit"
-                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs shadow-xs transition-all cursor-pointer flex items-center justify-center gap-2"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Add Chair</span>
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* Dashboard Personalization Settings View */}
-      {activeSection === 'dashboard' && (
-        <DashboardPersonalizationSection doctor={doctor} />
-      )}
-
-      {/* A4 Invoice & PDF Print Customizer Settings View */}
-      {activeSection === 'print' && (
-        <div className="space-y-5">
-          <PrintDesignerModule doctor={doctor} />
-        </div>
-      )}
-
-      {/* Profile & Theme View */}
-      {activeSection === 'profile' && (
-        <>
-      <div className="bg-theme-card p-6 rounded-[28px] border border-theme-border shadow-[0_10px_30px_rgba(0,0,0,0.03)] space-y-4 text-theme-main">
-        <div className="flex items-center justify-between border-b border-theme-border pb-3">
-          <div className="flex items-center gap-2 text-theme-accent font-bold text-base">
-            <Palette className="w-5 h-5 text-theme-accent" />
-            <span>1-Click Global Theme Manager</span>
-          </div>
-          <span className="text-xs font-mono font-bold px-3 py-1 rounded-full bg-theme-accent/15 text-theme-accent border border-theme-accent/30">
-            Active: {currentTheme.toUpperCase()}
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3.5 sm:gap-4">
-          {themeOptions.map((t) => {
-            const isActive = currentTheme === t.id;
-            return (
-              <button
-                key={t.id}
-                onClick={() => handleThemeChange(t.id)}
-                className={`p-4 rounded-2xl border text-left transition-all duration-200 flex flex-col justify-between space-y-3 relative group cursor-pointer ${
-                  isActive
-                    ? 'border-theme-accent ring-2 ring-theme-accent/30 bg-theme-accent/10 shadow-md scale-102'
-                    : 'border-theme-border hover:border-theme-accent/50 bg-theme-card hover:bg-theme-page'
-                }`}
-              >
-                <div>
-                  <div className="flex items-center justify-between gap-1">
-                    <span className="text-xs font-bold text-theme-main">{t.name}</span>
-                    {isActive && <CheckCircle2 className="w-4 h-4 text-theme-accent shrink-0" />}
-                  </div>
-                  <span className="text-[10px] text-theme-secondary font-medium block mt-0.5">{t.desc}</span>
-                </div>
-
-                {/* Color Swatch Preview */}
-                <div className="flex items-center gap-1.5 pt-1">
-                  <span
-                    className="w-5 h-5 rounded-full shadow-inner border border-white/20 shrink-0"
-                    style={{ backgroundColor: t.primary }}
-                    title={`Primary: ${t.primary}`}
-                  />
-                  <span
-                    className="w-5 h-5 rounded-full shadow-inner border border-white/20 shrink-0"
-                    style={{ backgroundColor: t.accent }}
-                    title={`Accent: ${t.accent}`}
-                  />
-                  <span
-                    className="w-5 h-5 rounded-full shadow-inner border border-zinc-300 shrink-0"
-                    style={{ backgroundColor: t.bg }}
-                    title={`Canvas: ${t.bg}`}
-                  />
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Clinic Branding & Logo Settings Card (Admin Only) */}
-      {activeRole === 'admin' && (
-      <div className="bg-theme-card p-6 rounded-[28px] border border-theme-border shadow-[0_10px_30px_rgba(0,0,0,0.03)] space-y-5 text-theme-main">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-theme-border pb-3 gap-2">
-          <div>
-            <div className="flex items-center gap-2 text-theme-accent font-bold text-base">
-              <ImageIcon className="w-5 h-5 text-theme-accent" />
-              <span>Clinic Branding & Logo Settings</span>
-            </div>
-            <p className="text-xs text-theme-secondary font-medium mt-0.5">
-              Customize logos across the Login Portal, App Sidebar, and printed Invoices & Prescriptions
-            </p>
-          </div>
-
+        {/* Admin Data Management Tab (Permanent Patient Deletion & DB Settings) */}
+        {activeRole === 'admin' && (
           <button
             type="button"
-            onClick={handleResetBranding}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-theme-page hover:bg-rose-50 text-theme-secondary hover:text-rose-700 border border-theme-border hover:border-rose-200 text-xs font-bold transition-all cursor-pointer shrink-0"
-            title="Reset branding to default FABIS logos"
+            onClick={() => {
+              setActiveSection('admin');
+              loadPatients();
+            }}
+            className={`px-4 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
+              activeSection === 'admin'
+                ? 'bg-rose-600 text-white shadow-md'
+                : 'bg-theme-card text-theme-secondary hover:text-rose-700 border border-theme-border'
+            }`}
           >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>Reset to Default Logos</span>
+            <UserX className="w-4 h-4 text-rose-300" />
+            <span>Admin Data Management</span>
           </button>
-        </div>
-
-        {brandingSavedSuccess && (
-          <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-2xl text-xs font-bold flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span>Branding updated! Changes saved to persistent storage and live across all components.</span>
-          </div>
         )}
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* 1. Primary Clinic Logo Uploader */}
-          <div className="p-5 rounded-2xl bg-theme-page/60 border border-theme-border flex flex-col justify-between space-y-4">
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-bold text-xs text-theme-main flex items-center gap-1.5">
-                  <Upload className="w-4 h-4 text-theme-accent" />
-                  <span>Primary Clinic Logo</span>
-                </span>
-                <span className="text-[10px] font-bold text-theme-accent bg-theme-accent/10 px-2 py-0.5 rounded-full border border-theme-accent/20">
-                  Login & Letterhead
-                </span>
-              </div>
-              <p className="text-[11px] text-theme-secondary font-medium mb-3">
-                Replaces top FABIS logo on the Login Card & printed Invoice / Rx headers. Accepts PNG, JPG, JPEG, SVG, WebP.
-              </p>
-
-              {/* Preview Container */}
-              <div className="p-4 bg-white rounded-2xl border border-theme-border flex items-center justify-center min-h-[120px] shadow-2xs relative group">
-                {clinicLogo ? (
-                  <img
-                    src={clinicLogo}
-                    alt="Custom Clinic Logo"
-                    className="max-h-24 max-w-full object-contain drop-shadow-xs"
-                  />
-                ) : (
-                  <div className="text-center py-2 space-y-1">
-                    <FabisLogo size="sm" showPillars={false} />
-                    <span className="text-[10px] text-slate-400 font-bold block mt-1">(Default FABIS Logo Active)</span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="flex items-center gap-2 pt-1">
-              <label className="flex-1 px-4 py-2.5 min-h-[42px] bg-theme-accent hover:bg-theme-accent-hover text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-colors">
-                <Upload className="w-4 h-4 text-white" />
-                <span>{clinicLogo ? 'Change Logo' : 'Upload Clinic Logo'}</span>
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/jpg,image/svg+xml,image/webp"
-                  onChange={(e) => handleFileUpload(e, 'clinicLogo')}
-                  className="hidden"
-                />
-              </label>
-
-              {clinicLogo && (
-                <button
-                  type="button"
-                  onClick={() => handleRemoveLogo('clinicLogo')}
-                  className="px-3 py-2.5 min-h-[42px] bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors"
-                  title="Remove custom logo"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* 2. App Sidebar / Favicon Icon Uploader */}
-          <div className="p-5 rounded-2xl bg-theme-page/60 border border-theme-border flex flex-col justify-between space-y-4">
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-bold text-xs text-theme-main flex items-center gap-1.5">
-                  <Upload className="w-4 h-4 text-theme-accent" />
-                  <span>App Sidebar / Favicon Icon</span>
-                </span>
-                <span className="text-[10px] font-bold text-theme-accent bg-theme-accent/10 px-2 py-0.5 rounded-full border border-theme-accent/20">
-                  Navigation Badge
-                </span>
-              </div>
-              <p className="text-[11px] text-theme-secondary font-medium mb-3">
-                Replaces tooth icon badge in the top sidebar navigation header. Accepts square PNG, JPG, JPEG, SVG, WebP.
-              </p>
-
-              {/* Preview Container */}
-              <div className="p-4 bg-white rounded-2xl border border-theme-border flex items-center justify-center min-h-[120px] shadow-2xs relative group">
-                {appIcon ? (
-                  <div className="w-16 h-16 rounded-2xl p-2 bg-theme-primary/10 border border-theme-primary/20 flex items-center justify-center shadow-xs">
-                    <img
-                      src={appIcon}
-                      alt="Custom App Icon"
-                      className="w-full h-full object-contain"
-                    />
-                  </div>
-                ) : (
-                  <div className="text-center py-2 space-y-2">
-                    <div className="w-12 h-12 mx-auto rounded-2xl bg-theme-primary/10 border border-theme-primary/20 flex items-center justify-center p-2.5">
-                      <svg className="w-8 h-8" viewBox="0 0 100 100" fill="none">
-                        <path
-                          d="M 50 20 C 32 20, 22 30, 22 48 C 22 66, 30 84, 42 86 C 47 87, 48 78, 50 78 C 52 78, 53 87, 58 86 C 70 84, 78 66, 78 48 C 78 30, 68 20, 50 20 Z"
-                          className="stroke-theme-primary"
-                          strokeWidth="7"
-                          strokeLinecap="round"
-                          fill="none"
-                        />
-                        <path
-                          d="M 38 40 C 42 32, 60 34, 54 68"
-                          className="stroke-theme-accent"
-                          strokeWidth="5"
-                          strokeLinecap="round"
-                          fill="none"
-                        />
-                      </svg>
-                    </div>
-                    <span className="text-[10px] text-slate-400 font-bold block">(Default Tooth Badge Active)</span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="flex items-center gap-2 pt-1">
-              <label className="flex-1 px-4 py-2.5 min-h-[42px] bg-theme-accent hover:bg-theme-accent-hover text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-colors">
-                <Upload className="w-4 h-4 text-white" />
-                <span>{appIcon ? 'Change App Icon' : 'Upload App Icon'}</span>
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/jpg,image/svg+xml,image/webp"
-                  onChange={(e) => handleFileUpload(e, 'appIcon')}
-                  className="hidden"
-                />
-              </label>
-
-              {appIcon && (
-                <button
-                  type="button"
-                  onClick={() => handleRemoveLogo('appIcon')}
-                  className="px-3 py-2.5 min-h-[42px] bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors"
-                  title="Remove custom icon"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
       </div>
+
+      {/* SMS Settings Section (Admin Only) */}
+      {activeSection === 'sms' && activeRole === 'admin' && (
+        <SmsIntegrationSettings activeRole={activeRole} />
       )}
 
-      {/* Admin Credentials Manager Section */}
-      {activeRole === 'admin' ? (
-        <form onSubmit={handleCredentialsSubmit} className="bg-white p-6 rounded-[28px] border border-[#E8ECF3] shadow-[0_10px_30px_rgba(0,0,0,0.03)] space-y-4 text-xs text-[#1E293B]">
-          <div className="border-b border-[#E8ECF3] pb-3 flex items-center justify-between">
-            <div className="flex items-center gap-2 text-purple-700 font-bold text-base">
-              <Key className="w-5 h-5 text-purple-600" />
-              <span>Admin & Doctor Credentials Manager</span>
+      {/* Profile & Prescription PDF Section */}
+      {activeSection === 'profile' && (
+        <>
+        {/* Clean Global Theme Palette Selector */}
+        <div className="bg-theme-card p-6 sm:p-7 rounded-[28px] border border-theme-border shadow-[0_10px_30px_rgba(0,0,0,0.03)] space-y-5 text-theme-main">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-theme-border pb-4 gap-3">
+            <div>
+              <div className="flex items-center gap-2.5 text-theme-accent font-extrabold text-lg">
+                <div className="p-2 rounded-xl bg-theme-accent/10 border border-theme-accent/20">
+                  <Palette className="w-5 h-5 text-theme-accent" />
+                </div>
+                <span>Clinical Theme Palette</span>
+              </div>
+              <p className="text-xs text-theme-secondary font-medium mt-1">
+                Select your preferred visual style across all clinical workflows and patient management screens.
+              </p>
             </div>
-            <span className="text-xs font-bold px-3 py-1 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
-              ⚙️ Admin Privileges Active
+            <span className="text-xs font-mono font-bold px-3.5 py-1.5 rounded-full bg-theme-accent/15 text-theme-accent border border-theme-accent/30 self-start sm:self-auto shrink-0 shadow-2xs">
+              Active: {currentTheme.toUpperCase()}
             </span>
           </div>
 
-          <p className="text-[#64748B] text-xs font-medium">
-            Updating credentials stores authentication states safely in localStorage without altering or deleting any existing EMR patient records, dental charts, or invoices.
-          </p>
+          {/* Clean 6-Theme Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5 sm:gap-4">
+            {themeOptions.map((t) => {
+              const isActive = currentTheme === t.id;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => handleThemeChange(t.id)}
+                  className={`p-4 rounded-2xl border text-left transition-all duration-200 flex flex-col justify-between gap-3 relative group cursor-pointer ${
+                    isActive
+                      ? 'border-theme-accent ring-2 ring-theme-accent/30 bg-theme-accent/10 shadow-md scale-[1.01]'
+                      : 'border-theme-border hover:border-theme-accent/50 bg-theme-card hover:bg-theme-page/60 shadow-2xs hover:shadow-sm'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-extrabold text-theme-main tracking-tight truncate">
+                      {t.name}
+                    </span>
+                    {isActive && (
+                      <CheckCircle2 className="w-4 h-4 text-theme-accent shrink-0" />
+                    )}
+                  </div>
+                  <span className="text-[11px] text-theme-secondary font-medium block truncate">
+                    {t.desc}
+                  </span>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-            {/* Admin Credentials */}
-            <div className="p-5 rounded-2xl bg-purple-50/50 border border-purple-100 space-y-3">
-              <div className="font-bold text-purple-900 text-xs flex items-center gap-1.5">
-                <span>⚙️ Admin Role Credentials</span>
-              </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    <span
+                      className="w-5 h-5 rounded-full shadow-inner border border-black/10"
+                      style={{ backgroundColor: t.primary }}
+                      title="Primary"
+                    />
+                    <span
+                      className="w-5 h-5 rounded-full shadow-inner border border-black/10"
+                      style={{ backgroundColor: t.accent }}
+                      title="Accent"
+                    />
+                    <span
+                      className="w-5 h-5 rounded-full shadow-inner border border-black/10"
+                      style={{ backgroundColor: t.light }}
+                      title="Pastel"
+                    />
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
-              <div>
-                <label className="text-[#1E293B] font-bold block mb-1">Admin Username / Email</label>
-                <input
-                  type="text"
-                  required
-                  value={credentials.adminUsername}
-                  onChange={(e) => setCredentials({ ...credentials, adminUsername: e.target.value })}
-                  className="w-full p-3 min-h-[44px] bg-white border border-purple-200 rounded-xl text-[#1E293B] font-mono text-xs focus:border-purple-600 outline-none transition-all"
-                />
-              </div>
+        {/* Doctor & Clinic Profile Settings Form */}
+        <form onSubmit={handleProfileSubmit} className="bg-white p-6 sm:p-7 rounded-[28px] border border-[#E8ECF3] shadow-[0_10px_30px_rgba(0,0,0,0.03)] space-y-6 text-xs text-[#1E293B]">
+          <div className="border-b border-[#E8ECF3] pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-[#3BA7F5] font-bold text-base">
+              <User className="w-5 h-5 text-[#3BA7F5]" />
+              <span>Doctor Information & Medical Credentials</span>
+            </div>
+            <button
+              type="button"
+              onClick={handlePreviewSamplePrescription}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 text-xs font-bold transition-all cursor-pointer shadow-xs self-start sm:self-auto"
+            >
+              <Eye className="w-4 h-4 text-sky-600" />
+              <span>Preview Sample Prescription PDF</span>
+            </button>
+          </div>
 
-              <div>
-                <label className="text-[#1E293B] font-bold block mb-1">Admin Password / PIN</label>
-                <input
-                  type="text"
-                  required
-                  value={credentials.adminPin}
-                  onChange={(e) => setCredentials({ ...credentials, adminPin: e.target.value })}
-                  className="w-full p-3 min-h-[44px] bg-white border border-purple-200 rounded-xl text-[#1E293B] font-mono text-xs focus:border-purple-600 outline-none transition-all"
-                />
-              </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-[#1E293B] font-bold block mb-1.5">Doctor Full Name *</label>
+              <input
+                type="text"
+                required
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                className="w-full p-3 bg-[#F8FAFC] border border-[#E8ECF3] rounded-2xl text-[#1E293B] focus:border-[#3BA7F5] outline-none transition-all"
+              />
             </div>
 
-            {/* Doctor Credentials */}
-            <div className="p-5 rounded-2xl bg-emerald-50/50 border border-emerald-100 space-y-3">
-              <div className="font-bold text-emerald-900 text-xs flex items-center gap-1.5">
-                <span>👨‍⚕️ Doctor Role Credentials</span>
-              </div>
+            <div>
+              <label className="text-[#1E293B] font-bold block mb-1.5">Medical Registration Number *</label>
+              <input
+                type="text"
+                required
+                value={formData.regNumber}
+                onChange={(e) => setFormData({ ...formData, regNumber: e.target.value })}
+                className="w-full p-3 bg-[#F8FAFC] border border-[#E8ECF3] rounded-2xl text-[#1E293B] font-mono focus:border-[#3BA7F5] outline-none transition-all"
+              />
+            </div>
 
+            <div>
+              <label className="text-[#1E293B] font-bold block mb-1.5">Qualifications *</label>
+              <input
+                type="text"
+                required
+                value={formData.qualifications}
+                onChange={(e) => setFormData({ ...formData, qualifications: e.target.value })}
+                className="w-full p-3 bg-[#F8FAFC] border border-[#E8ECF3] rounded-2xl text-[#1E293B] focus:border-[#3BA7F5] outline-none transition-all"
+              />
+            </div>
+
+            <div>
+              <label className="text-[#1E293B] font-bold block mb-1.5">Title / Specialty</label>
+              <input
+                type="text"
+                value={formData.title}
+                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                className="w-full p-3 bg-[#F8FAFC] border border-[#E8ECF3] rounded-2xl text-[#1E293B] focus:border-[#3BA7F5] outline-none transition-all"
+              />
+            </div>
+          </div>
+
+          <div className="border-b border-[#E8ECF3] pt-4 pb-3 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-[#3BA7F5] font-bold text-base">
+              <Building className="w-5 h-5 text-[#3BA7F5]" />
+              <span>Clinic Letterhead & Contact Details</span>
+            </div>
+            <span className="text-[11px] text-slate-400 font-medium">Printed on all prescriptions and tax invoices</span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-[#1E293B] font-bold block mb-1.5">
+                Clinic Display Name <span className="text-slate-400 font-normal">(Sidebar & Navigation)</span>
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. RK Dental Clinic"
+                value={formData.clinicDisplayName || ''}
+                onChange={(e) => setFormData({ ...formData, clinicDisplayName: e.target.value })}
+                className="w-full p-3 bg-[#F8FAFC] border border-[#E8ECF3] rounded-2xl text-[#1E293B] focus:border-[#3BA7F5] outline-none transition-all font-medium"
+              />
+            </div>
+
+            <div>
+              <label className="text-[#1E293B] font-bold block mb-1.5">Clinic Legal / Letterhead Name *</label>
+              <input
+                type="text"
+                required
+                placeholder="e.g. FABIS MediCare Dental Clinic"
+                value={formData.clinicName}
+                onChange={(e) => setFormData({ ...formData, clinicName: e.target.value })}
+                className="w-full p-3 bg-[#F8FAFC] border border-[#E8ECF3] rounded-2xl text-[#1E293B] focus:border-[#3BA7F5] outline-none transition-all"
+              />
+            </div>
+
+            <div>
+              <label className="text-[#1E293B] font-bold block mb-1.5">Phone Number(s) *</label>
+              <input
+                type="text"
+                required
+                value={formData.clinicPhone}
+                onChange={(e) => setFormData({ ...formData, clinicPhone: e.target.value })}
+                className="w-full p-3 bg-[#F8FAFC] border border-[#E8ECF3] rounded-2xl text-[#1E293B] focus:border-[#3BA7F5] outline-none transition-all"
+              />
+            </div>
+
+            <div>
+              <label className="text-[#1E293B] font-bold block mb-1.5">Clinic Email</label>
+              <input
+                type="email"
+                value={formData.clinicEmail || ''}
+                onChange={(e) => setFormData({ ...formData, clinicEmail: e.target.value })}
+                className="w-full p-3 bg-[#F8FAFC] border border-[#E8ECF3] rounded-2xl text-[#1E293B] focus:border-[#3BA7F5] outline-none transition-all"
+              />
+            </div>
+
+            <div>
+              <label className="text-[#1E293B] font-bold block mb-1.5 flex items-center gap-1.5">
+                <Globe className="w-3.5 h-3.5 text-sky-600" />
+                <span>Clinic Website</span>
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. www.rkdentalclinic.com"
+                value={formData.website || ''}
+                onChange={(e) => setFormData({ ...formData, website: e.target.value })}
+                className="w-full p-3 bg-[#F8FAFC] border border-[#E8ECF3] rounded-2xl text-[#1E293B] focus:border-[#3BA7F5] outline-none transition-all"
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="text-[#1E293B] font-bold block mb-1.5">Clinic Address *</label>
+              <input
+                type="text"
+                required
+                value={formData.clinicAddress}
+                onChange={(e) => setFormData({ ...formData, clinicAddress: e.target.value })}
+                className="w-full p-3 bg-[#F8FAFC] border border-[#E8ECF3] rounded-2xl text-[#1E293B] focus:border-[#3BA7F5] outline-none transition-all"
+              />
+            </div>
+          </div>
+
+          {/* GST Details Section */}
+          <div className="bg-slate-50/80 rounded-2xl p-4 sm:p-5 border border-slate-200/80 space-y-3.5">
+            <div className="flex items-center justify-between border-b border-slate-200/60 pb-2.5">
+              <div className="flex items-center gap-2">
+                <Receipt className="w-4 h-4 text-sky-600" />
+                <span className="font-extrabold text-sm text-slate-800 tracking-tight">GST Details</span>
+              </div>
+              <span className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                Optional
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="text-[#1E293B] font-bold block mb-1">Doctor Username / Email</label>
+                <label className="text-[#1E293B] font-bold block mb-1.5">GST Number / GSTIN</label>
                 <input
                   type="text"
-                  required
-                  value={credentials.doctorUsername}
-                  onChange={(e) => setCredentials({ ...credentials, doctorUsername: e.target.value })}
-                  className="w-full p-3 min-h-[44px] bg-white border border-emerald-200 rounded-xl text-[#1E293B] font-mono text-xs focus:border-emerald-600 outline-none transition-all"
+                  placeholder="e.g. 27AAAAA0000A1Z5"
+                  value={formData.gstin || ''}
+                  onChange={(e) => setFormData({ ...formData, gstin: e.target.value.toUpperCase() })}
+                  className="w-full p-3 bg-white border border-[#E8ECF3] rounded-2xl text-[#1E293B] font-mono uppercase focus:border-[#3BA7F5] outline-none transition-all"
                 />
               </div>
 
               <div>
-                <label className="text-[#1E293B] font-bold block mb-1">Doctor Password / PIN</label>
+                <label className="text-[#1E293B] font-bold block mb-1.5">
+                  GST Registered Name <span className="text-slate-400 font-normal">(optional)</span>
+                </label>
                 <input
                   type="text"
-                  required
-                  value={credentials.doctorPin}
-                  onChange={(e) => setCredentials({ ...credentials, doctorPin: e.target.value })}
-                  className="w-full p-3 min-h-[44px] bg-white border border-emerald-200 rounded-xl text-[#1E293B] font-mono text-xs focus:border-emerald-600 outline-none transition-all"
+                  placeholder="e.g. RK Dental Healthcare LLP"
+                  value={formData.gstRegisteredName || ''}
+                  onChange={(e) => setFormData({ ...formData, gstRegisteredName: e.target.value })}
+                  className="w-full p-3 bg-white border border-[#E8ECF3] rounded-2xl text-[#1E293B] focus:border-[#3BA7F5] outline-none transition-all"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="text-[#1E293B] font-bold block mb-1.5">
+                  GST Address <span className="text-slate-400 font-normal">(optional if different from clinic address)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Principal Place of Business / Registered Office"
+                  value={formData.gstAddress || ''}
+                  onChange={(e) => setFormData({ ...formData, gstAddress: e.target.value })}
+                  className="w-full p-3 bg-white border border-[#E8ECF3] rounded-2xl text-[#1E293B] focus:border-[#3BA7F5] outline-none transition-all"
                 />
               </div>
             </div>
           </div>
 
-          <div className="flex items-center justify-between pt-3 border-t border-[#E8ECF3]">
-            {credSavedSuccess ? (
+          {/* Prescription Branding Assets (Logo, Signature, Stamp) */}
+          <div className="border-t border-[#E8ECF3] pt-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-slate-900 font-extrabold text-sm">
+                <ImageIcon className="w-4 h-4 text-sky-600" />
+                <span>Prescription Letterhead Assets (Logo, Signature & Stamp)</span>
+              </div>
+              <span className="text-[11px] text-slate-500 font-medium">Integrated into PDF generation engine</span>
+            </div>
+
+            {brandingSavedSuccess && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-2xl text-xs font-bold flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>Letterhead assets updated! Saved persistently in Supabase and local storage.</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* 1. Clinic Logo */}
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col justify-between space-y-3">
+                <div>
+                  <span className="font-bold text-xs text-slate-800 block mb-1">Clinic Logo</span>
+                  <p className="text-[10px] text-slate-500 mb-2">Printed on top header of Rx & invoices</p>
+                  
+                  <div className="p-3 bg-white rounded-xl border border-slate-200 flex items-center justify-center min-h-[90px]">
+                    {clinicLogo ? (
+                      <img src={clinicLogo} alt="Clinic Logo" className="max-h-16 max-w-full object-contain" />
+                    ) : (
+                      <span className="text-[10px] text-slate-400 font-semibold">No custom logo</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <label className="flex-1 px-3 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Upload</span>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/jpg,image/svg+xml,image/webp"
+                      onChange={(e) => handleFileUpload(e, 'clinicLogo')}
+                      className="hidden"
+                    />
+                  </label>
+                  {clinicLogo && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveAsset('clinicLogo')}
+                      className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl cursor-pointer"
+                      title="Remove logo"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* 2. Doctor Signature */}
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col justify-between space-y-3">
+                <div>
+                  <span className="font-bold text-xs text-slate-800 block mb-1">Doctor Signature</span>
+                  <p className="text-[10px] text-slate-500 mb-2">Appears in footer above doctor name</p>
+                  
+                  <div className="p-3 bg-white rounded-xl border border-slate-200 flex items-center justify-center min-h-[90px]">
+                    {doctorSignature ? (
+                      <img src={doctorSignature} alt="Doctor Signature" className="max-h-16 max-w-full object-contain" />
+                    ) : (
+                      <span className="text-[10px] text-slate-400 font-semibold">No signature attached</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <label className="flex-1 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Upload</span>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/jpg,image/svg+xml,image/webp"
+                      onChange={(e) => handleFileUpload(e, 'doctorSignature')}
+                      className="hidden"
+                    />
+                  </label>
+                  {doctorSignature && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveAsset('doctorSignature')}
+                      className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl cursor-pointer"
+                      title="Remove signature"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* 3. Clinic Official Stamp */}
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col justify-between space-y-3">
+                <div>
+                  <span className="font-bold text-xs text-slate-800 block mb-1">Clinic Stamp</span>
+                  <p className="text-[10px] text-slate-500 mb-2">Watermark seal on verified prescriptions</p>
+                  
+                  <div className="p-3 bg-white rounded-xl border border-slate-200 flex items-center justify-center min-h-[90px]">
+                    {clinicStamp ? (
+                      <img src={clinicStamp} alt="Clinic Stamp" className="max-h-16 max-w-full object-contain" />
+                    ) : (
+                      <span className="text-[10px] text-slate-400 font-semibold">No official stamp</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <label className="flex-1 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Upload</span>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/jpg,image/svg+xml,image/webp"
+                      onChange={(e) => handleFileUpload(e, 'clinicStamp')}
+                      className="hidden"
+                    />
+                  </label>
+                  {clinicStamp && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveAsset('clinicStamp')}
+                      className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl cursor-pointer"
+                      title="Remove stamp"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Optional Touch / Mouse Signature Drawer */}
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
+                  <PenTool className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Or Draw Signature Live (Touch / Mouse)</span>
+                </span>
+                {hasCanvasDrawn && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={clearCanvasSignature}
+                      className="px-2.5 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-[10px] font-bold cursor-pointer"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveCanvasSignature}
+                      className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold cursor-pointer shadow-xs"
+                    >
+                      Save As Signature
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="bg-white rounded-xl border border-dashed border-slate-300 overflow-hidden flex items-center justify-center">
+                <canvas
+                  ref={sigCanvasRef}
+                  width={600}
+                  height={130}
+                  onMouseDown={startDrawing}
+                  onMouseMove={drawSignature}
+                  onMouseUp={stopDrawing}
+                  onMouseLeave={stopDrawing}
+                  onTouchStart={startDrawing}
+                  onTouchMove={drawSignature}
+                  onTouchEnd={stopDrawing}
+                  className="cursor-crosshair w-full max-w-[600px] h-[130px] touch-none"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-4 border-t border-[#E8ECF3]">
+            {savedSuccess ? (
               <span className="text-emerald-700 font-bold flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" /> Credentials updated! EMR data preserved 100%.
+                <ShieldCheck className="w-4 h-4 text-emerald-600" /> Profile & Letterhead settings updated successfully!
               </span>
             ) : (
-              <span className="text-[#94A3B8]">Admin credentials take effect immediately on next login</span>
+              <span className="text-[#94A3B8]">Persisted in Supabase & Local Database</span>
             )}
 
             <button
               type="submit"
-              className="px-6 py-2.5 rounded-full bg-purple-700 hover:bg-purple-800 text-white font-bold text-xs shadow flex items-center gap-2 cursor-pointer"
+              className="px-6 py-3 rounded-full bg-[#3BA7F5] hover:bg-[#2A96E4] text-white font-bold text-xs shadow-[0_8px_20px_rgba(59,167,245,0.3)] flex items-center gap-2 transition-all cursor-pointer"
             >
-              <Save className="w-4 h-4 text-purple-200" />
-              <span>Save Credentials</span>
+              <Save className="w-4 h-4 text-white" />
+              <span>Save Doctor Profile</span>
             </button>
           </div>
         </form>
-      ) : (
-        <div className="bg-[#EBF7FC] p-4 rounded-2xl border border-[#3BA7F5]/30 text-xs text-[#1E88A8] flex items-center gap-3 font-medium">
-          <LockKeyhole className="w-5 h-5 text-[#3BA7F5] shrink-0" />
-          <div>
-            <span className="font-bold block text-[#1E293B]">User Credentials Manager Restricted</span>
-            <span>Switch to ⚙️ Admin Role to modify system passwords, PINs, or global price master settings.</span>
-          </div>
-        </div>
-      )}
 
-      {/* Doctor & Clinic Profile Settings */}
-      <form onSubmit={handleProfileSubmit} className="bg-white p-6 rounded-[28px] border border-[#E8ECF3] shadow-[0_10px_30px_rgba(0,0,0,0.03)] space-y-5 text-xs text-[#1E293B]">
-        <div className="border-b border-[#E8ECF3] pb-3 flex items-center gap-2 text-[#3BA7F5] font-bold text-base">
-          <User className="w-5 h-5 text-[#3BA7F5]" />
-          <span>Doctor Information & Medical Credentials</span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="text-[#1E293B] font-bold block mb-1.5">Doctor Full Name *</label>
-            <input
-              type="text"
-              required
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              className="w-full p-3 bg-[#F8FAFC] border border-[#E8ECF3] rounded-2xl text-[#1E293B] focus:border-[#3BA7F5] outline-none transition-all"
-            />
-          </div>
-
-          <div>
-            <label className="text-[#1E293B] font-bold block mb-1.5">Medical Registration Number *</label>
-            <input
-              type="text"
-              required
-              value={formData.regNumber}
-              onChange={(e) => setFormData({ ...formData, regNumber: e.target.value })}
-              className="w-full p-3 bg-[#F8FAFC] border border-[#E8ECF3] rounded-2xl text-[#1E293B] font-mono focus:border-[#3BA7F5] outline-none transition-all"
-            />
-          </div>
-
-          <div>
-            <label className="text-[#1E293B] font-bold block mb-1.5">Qualifications *</label>
-            <input
-              type="text"
-              required
-              value={formData.qualifications}
-              onChange={(e) => setFormData({ ...formData, qualifications: e.target.value })}
-              className="w-full p-3 bg-[#F8FAFC] border border-[#E8ECF3] rounded-2xl text-[#1E293B] focus:border-[#3BA7F5] outline-none transition-all"
-            />
-          </div>
-
-          <div>
-            <label className="text-[#1E293B] font-bold block mb-1.5">Title / Specialty</label>
-            <input
-              type="text"
-              value={formData.title}
-              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              className="w-full p-3 bg-[#F8FAFC] border border-[#E8ECF3] rounded-2xl text-[#1E293B] focus:border-[#3BA7F5] outline-none transition-all"
-            />
-          </div>
-        </div>
-
-        <div className="border-b border-[#E8ECF3] pt-4 pb-3 flex items-center gap-2 text-[#3BA7F5] font-bold text-base">
-          <Building className="w-5 h-5 text-[#3BA7F5]" />
-          <span>Clinic & Letterhead Details</span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="text-[#1E293B] font-bold block mb-1.5">Clinic Name *</label>
-            <input
-              type="text"
-              required
-              value={formData.clinicName}
-              onChange={(e) => setFormData({ ...formData, clinicName: e.target.value })}
-              className="w-full p-3 bg-[#F8FAFC] border border-[#E8ECF3] rounded-2xl text-[#1E293B] focus:border-[#3BA7F5] outline-none transition-all"
-            />
-          </div>
-
-          <div>
-            <label className="text-[#1E293B] font-bold block mb-1.5">Phone Number(s) *</label>
-            <input
-              type="text"
-              required
-              value={formData.clinicPhone}
-              onChange={(e) => setFormData({ ...formData, clinicPhone: e.target.value })}
-              className="w-full p-3 bg-[#F8FAFC] border border-[#E8ECF3] rounded-2xl text-[#1E293B] focus:border-[#3BA7F5] outline-none transition-all"
-            />
-          </div>
-
-          <div className="md:col-span-2">
-            <label className="text-[#1E293B] font-bold block mb-1.5">Clinic Address *</label>
-            <input
-              type="text"
-              required
-              value={formData.clinicAddress}
-              onChange={(e) => setFormData({ ...formData, clinicAddress: e.target.value })}
-              className="w-full p-3 bg-[#F8FAFC] border border-[#E8ECF3] rounded-2xl text-[#1E293B] focus:border-[#3BA7F5] outline-none transition-all"
-            />
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between pt-4 border-t border-[#E8ECF3]">
-          {savedSuccess ? (
-            <span className="text-emerald-700 font-bold flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4 text-emerald-600" /> Profile updated successfully!
-            </span>
-          ) : (
-            <span className="text-[#94A3B8]">Changes reflect on printed Rx & Invoices automatically</span>
-          )}
-
-          <button
-            type="submit"
-            className="px-6 py-3 rounded-full bg-[#3BA7F5] hover:bg-[#2A96E4] text-white font-bold text-xs shadow-[0_8px_20px_rgba(59,167,245,0.3)] flex items-center gap-2 transition-all cursor-pointer"
-          >
-            <Save className="w-4 h-4 text-white" />
-            <span>Save Profile Settings</span>
-          </button>
-        </div>
-      </form>
-      </>
-      )}
-
-      {/* Production-Grade Data Protection, Encrypted Backup & Restore Card */}
-      {activeSection === 'backup' && (
-      <div className="bg-white p-6 rounded-[28px] border border-[#E8ECF3] shadow-[0_10px_30px_rgba(0,0,0,0.03)] space-y-6 text-xs text-[#1E293B]">
-        <div className="border-b border-[#E8ECF3] pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-indigo-700 font-bold text-base">
-            <Database className="w-5 h-5 text-indigo-600" />
-            <span>Automated Cloud Backup & Disaster Recovery Engine</span>
-          </div>
-          <span className="px-3.5 py-1 bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-full text-xs font-extrabold flex items-center gap-1.5 self-start sm:self-auto">
-            <CloudCheck className="w-4 h-4 text-emerald-600" />
-            <span>Supabase Cloud Auto-Sync Active</span>
-          </span>
-        </div>
-
-        {/* Supabase Cloud Auto-Sync Banner & Controls */}
-        <div className="p-5 rounded-2xl bg-gradient-to-r from-teal-900 via-slate-900 to-indigo-950 text-white space-y-4 shadow-md border border-teal-800/40">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 font-black text-sm text-teal-300">
-                <Server className="w-4 h-4 text-teal-300" />
-                <span>Live Supabase Cloud Sync & Failsafe Storage</span>
+        {/* Admin Credentials Manager Section */}
+        {activeRole === 'admin' && (
+          <form onSubmit={handleCredentialsSubmit} className="bg-white p-6 rounded-[28px] border border-[#E8ECF3] shadow-[0_10px_30px_rgba(0,0,0,0.03)] space-y-4 text-xs text-[#1E293B]">
+            <div className="border-b border-[#E8ECF3] pb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-purple-700 font-bold text-base">
+                <Key className="w-5 h-5 text-purple-600" />
+                <span>Admin & Doctor Credentials Manager</span>
               </div>
-              <p className="text-xs text-slate-300 font-medium max-w-2xl">
-                Background auto-sync routinely backs up all clinic data (Patients, Appointments, Treatments, Bills, Prescriptions, Settings, Branding, and Reports) to the Supabase database.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={handleManualCloudBackup}
-                disabled={isCloudSyncing}
-                className="px-4 py-2.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-extrabold text-xs transition-all cursor-pointer shadow-xs flex items-center gap-2 disabled:opacity-50"
-              >
-                <RefreshCw className={`w-4 h-4 text-slate-950 ${isCloudSyncing ? 'animate-spin' : ''}`} />
-                <span>{isCloudSyncing ? 'Syncing...' : 'Backup Now to Cloud'}</span>
-              </button>
-
-              {activeRole === 'admin' && (
-                <button
-                  type="button"
-                  onClick={handleRestoreFromCloud}
-                  disabled={isCloudSyncing}
-                  className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs transition-all cursor-pointer shadow-xs flex items-center gap-2 disabled:opacity-50"
-                  title="Admin-only: Recover all clinic data from cloud snapshot without duplicates"
-                >
-                  <UploadCloud className="w-4 h-4 text-slate-950" />
-                  <span>Restore from Cloud Backup</span>
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-4 text-[11px] font-mono pt-2 border-t border-slate-700/60 text-slate-300">
-            <div>
-              Last Cloud Backup:{' '}
-              <span className="font-bold text-teal-300">
-                {lastCloudSync ? new Date(lastCloudSync).toLocaleString() : 'Just now'}
+              <span className="text-xs font-bold px-3 py-1 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
+                ⚙️ Admin Privileges Active
               </span>
             </div>
-            <div>•</div>
-            <div>
-              Sync Status:{' '}
-              <span className="font-bold text-emerald-400">
-                {isCloudSyncing ? 'Syncing...' : 'Synced & Secured'}
-              </span>
-            </div>
-            <div>•</div>
-            <div>
-              Duplicate Prevention:{' '}
-              <span className="font-bold text-amber-300">Active (MRN & ID Deduplication)</span>
-            </div>
-          </div>
-        </div>
 
-        {cloudRestoreMessage && (
-          <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 p-4 rounded-2xl flex items-center gap-2.5 text-xs font-bold animate-fadeIn">
-            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-            <span>{cloudRestoreMessage}</span>
-          </div>
-        )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+              {/* Admin Credentials */}
+              <div className="p-5 rounded-2xl bg-purple-50/50 border border-purple-100 space-y-3">
+                <div className="font-bold text-purple-900 text-xs flex items-center gap-1.5">
+                  <span>⚙️ Admin Role Credentials</span>
+                </div>
 
-        {backupNotice && (
-          <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3.5 rounded-2xl flex items-center gap-2 text-xs font-bold">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span>{backupNotice}</span>
-          </div>
-        )}
+                <div>
+                  <label className="text-[#1E293B] font-bold block mb-1">Admin Username / Email</label>
+                  <input
+                    type="text"
+                    required
+                    value={credentials.adminUsername}
+                    onChange={(e) => setCredentials({ ...credentials, adminUsername: e.target.value })}
+                    className="w-full p-3 min-h-[44px] bg-white border border-purple-200 rounded-xl text-[#1E293B] font-mono text-xs focus:border-purple-600 outline-none transition-all"
+                  />
+                </div>
 
-        {restoreSuccess && (
-          <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3.5 rounded-2xl flex items-center gap-2 text-xs font-bold">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span>{restoreSuccess}</span>
-          </div>
-        )}
-
-        {restoreError && (
-          <div className="bg-rose-50 border border-rose-200 text-rose-800 p-3.5 rounded-2xl flex items-center gap-2 text-xs font-bold">
-            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-            <span>{restoreError}</span>
-          </div>
-        )}
-
-        {/* Supabase Database Connection & Auto-Provisioning Manager */}
-        <div className="p-5 bg-[#F8FAFC] border border-[#E8ECF3] rounded-2xl space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
-            <div>
-              <div className="flex items-center gap-2 font-bold text-sm text-slate-900">
-                <Database className="w-4 h-4 text-teal-600" />
-                <span>Supabase Cloud Integration & Table Provisioning</span>
+                <div>
+                  <label className="text-[#1E293B] font-bold block mb-1">Admin Password / PIN</label>
+                  <input
+                    type="text"
+                    required
+                    value={credentials.adminPin}
+                    onChange={(e) => setCredentials({ ...credentials, adminPin: e.target.value })}
+                    className="w-full p-3 min-h-[44px] bg-white border border-purple-200 rounded-xl text-[#1E293B] font-mono text-xs focus:border-purple-600 outline-none transition-all"
+                  />
+                </div>
               </div>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Automated multi-tenant sync across <code className="font-mono bg-slate-200 px-1 py-0.5 rounded text-[10px]">clinic_backups</code>, <code className="font-mono bg-slate-200 px-1 py-0.5 rounded text-[10px]">patients</code>, <code className="font-mono bg-slate-200 px-1 py-0.5 rounded text-[10px]">chairs</code>, and <code className="font-mono bg-slate-200 px-1 py-0.5 rounded text-[10px]">sms_logs</code>.
-              </p>
+
+              {/* Doctor Credentials */}
+              <div className="p-5 rounded-2xl bg-emerald-50/50 border border-emerald-100 space-y-3">
+                <div className="font-bold text-emerald-900 text-xs flex items-center gap-1.5">
+                  <span>👨‍⚕️ Doctor Role Credentials</span>
+                </div>
+
+                <div>
+                  <label className="text-[#1E293B] font-bold block mb-1">Doctor Username / Email</label>
+                  <input
+                    type="text"
+                    required
+                    value={credentials.doctorUsername}
+                    onChange={(e) => setCredentials({ ...credentials, doctorUsername: e.target.value })}
+                    className="w-full p-3 min-h-[44px] bg-white border border-emerald-200 rounded-xl text-[#1E293B] font-mono text-xs focus:border-emerald-600 outline-none transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[#1E293B] font-bold block mb-1">Doctor Password / PIN</label>
+                  <input
+                    type="text"
+                    required
+                    value={credentials.doctorPin}
+                    onChange={(e) => setCredentials({ ...credentials, doctorPin: e.target.value })}
+                    className="w-full p-3 min-h-[44px] bg-white border border-emerald-200 rounded-xl text-[#1E293B] font-mono text-xs focus:border-emerald-600 outline-none transition-all"
+                  />
+                </div>
+              </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleTestSupabaseConn}
-                disabled={isTestingSupabase}
-                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-xs disabled:opacity-50"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isTestingSupabase ? 'animate-spin' : ''}`} />
-                <span>Test Connection</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowSqlSchemaModal(true)}
-                className="px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
-              >
-                <Code2 className="w-3.5 h-3.5" />
-                <span>View / Copy SQL Schema</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Table Readiness Badges */}
-          {supabaseTestResult && (
-            <div className="p-3 bg-white rounded-xl border border-slate-200 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-700">Endpoint: <span className="font-mono text-teal-700">{supabaseTestResult.url}</span></span>
-                <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold ${supabaseTestResult.connected ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                  {supabaseTestResult.connected ? 'Connected' : 'Connection Failed'}
+            <div className="flex items-center justify-between pt-3 border-t border-[#E8ECF3]">
+              {credSavedSuccess ? (
+                <span className="text-emerald-700 font-bold flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" /> Credentials updated safely.
                 </span>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 border-t border-slate-100">
-                <div className="flex items-center gap-1.5 text-[11px] font-mono">
-                  {supabaseTestResult.tables?.clinic_backups ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" /> : <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
-                  <span className={supabaseTestResult.tables?.clinic_backups ? 'text-emerald-800 font-bold' : 'text-slate-600'}>clinic_backups</span>
-                </div>
-                <div className="flex items-center gap-1.5 text-[11px] font-mono">
-                  {supabaseTestResult.tables?.patients ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" /> : <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
-                  <span className={supabaseTestResult.tables?.patients ? 'text-emerald-800 font-bold' : 'text-slate-600'}>patients</span>
-                </div>
-                <div className="flex items-center gap-1.5 text-[11px] font-mono">
-                  {supabaseTestResult.tables?.chairs ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" /> : <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
-                  <span className={supabaseTestResult.tables?.chairs ? 'text-emerald-800 font-bold' : 'text-slate-600'}>chairs</span>
-                </div>
-                <div className="flex items-center gap-1.5 text-[11px] font-mono">
-                  {supabaseTestResult.tables?.sms_logs ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" /> : <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
-                  <span className={supabaseTestResult.tables?.sms_logs ? 'text-emerald-800 font-bold' : 'text-slate-600'}>sms_logs</span>
-                </div>
-              </div>
-
-              {supabaseTestResult.error && (
-                <p className="text-[11px] text-amber-800 bg-amber-50 p-2 rounded-lg font-mono">
-                  Notice: {supabaseTestResult.error}
-                </p>
+              ) : (
+                <span className="text-[#94A3B8]">Changes apply immediately on next sign in</span>
               )}
+
+              <button
+                type="submit"
+                className="px-6 py-2.5 rounded-full bg-purple-700 hover:bg-purple-800 text-white font-bold text-xs shadow flex items-center gap-2 cursor-pointer"
+              >
+                <Save className="w-4 h-4 text-purple-200" />
+                <span>Save Credentials</span>
+              </button>
             </div>
-          )}
+          </form>
+        )}
+        </>
+      )}
 
-          {/* Admin Custom Credentials Form */}
-          {activeRole === 'admin' && (
-            <form onSubmit={handleSaveSupabaseSettings} className="space-y-3 pt-2">
-              <span className="text-xs font-bold text-slate-800 block">Custom Supabase Project Credentials</span>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <input
-                  type="url"
-                  placeholder="https://your-project.supabase.co"
-                  value={supabaseUrlInput}
-                  onChange={(e) => setSupabaseUrlInput(e.target.value)}
-                  className="px-3.5 py-2 rounded-xl bg-white border border-slate-300 text-xs font-mono outline-none focus:border-teal-500"
-                />
-                <input
-                  type="password"
-                  placeholder="Anon / Public API Key"
-                  value={supabaseKeyInput}
-                  onChange={(e) => setSupabaseKeyInput(e.target.value)}
-                  className="px-3.5 py-2 rounded-xl bg-white border border-slate-300 text-xs font-mono outline-none focus:border-teal-500"
-                />
+      {/* Simplified, Clean & Compact Data Backup Card */}
+      {activeSection === 'backup' && (
+        <div className="bg-theme-card p-6 rounded-[28px] border border-theme-border shadow-[0_10px_30px_rgba(0,0,0,0.03)] space-y-6 text-xs text-theme-main max-w-3xl">
+          <div className="border-b border-theme-border pb-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-2xl bg-indigo-100 text-indigo-700">
+                <Database className="w-6 h-6" />
               </div>
-              <div className="flex items-center justify-end">
-                <button
-                  type="submit"
-                  disabled={isTestingSupabase}
-                  className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl transition-all cursor-pointer shadow-xs disabled:opacity-50"
-                >
-                  Save Credentials & Reconnect
-                </button>
+              <div>
+                <h3 className="font-extrabold text-lg text-theme-main">DATA BACKUP & CLOUD RECOVERY</h3>
+                <p className="text-xs text-theme-secondary font-medium">
+                  Secure local and cloud disaster recovery snapshots
+                </p>
               </div>
-            </form>
-          )}
-        </div>
+            </div>
 
-        {/* SQL Schema Modal */}
-        {showSqlSchemaModal && (
-          <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-fadeIn">
-            <div className="bg-white rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] flex flex-col">
-              <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-                <div className="flex items-center gap-2 text-teal-700 font-bold text-base">
-                  <Terminal className="w-5 h-5 text-teal-600" />
-                  <span>Supabase SQL Provisioning Schema</span>
-                </div>
-                <button
-                  onClick={() => setShowSqlSchemaModal(false)}
-                  className="p-1.5 rounded-full hover:bg-slate-100 text-slate-500 font-bold cursor-pointer"
-                >
-                  ✕
-                </button>
-              </div>
+            <span className="px-3.5 py-1.5 bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-full text-xs font-extrabold flex items-center gap-1.5">
+              <CloudCheck className="w-4 h-4 text-emerald-600" />
+              <span>✓ Cloud Connected</span>
+            </span>
+          </div>
 
-              <p className="text-xs text-slate-600 font-medium">
-                If you are connecting a brand new Supabase instance, copy this SQL script and execute it in your Supabase Project's <strong>SQL Editor</strong> tab to initialize all required tables automatically:
-              </p>
-
-              <div className="relative flex-1 bg-slate-950 text-emerald-400 p-4 rounded-2xl font-mono text-[11px] overflow-auto max-h-72 border border-slate-800">
-                <pre>{getRequiredSupabaseSqlSchema()}</pre>
-              </div>
-
-              <div className="flex items-center justify-between pt-2 border-t border-slate-200">
-                {copiedSql ? (
-                  <span className="text-xs font-bold text-emerald-700 flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" /> SQL Schema Copied to Clipboard!
-                  </span>
-                ) : (
-                  <span className="text-xs text-slate-400">Creates clinic_backups, patients, chairs, sms_logs</span>
-                )}
-
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleCopySqlSchema}
-                    className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-bold text-xs flex items-center gap-2 shadow-xs transition-all cursor-pointer"
-                  >
-                    <Copy className="w-4 h-4" />
-                    <span>Copy SQL Schema</span>
-                  </button>
-                  <button
-                    onClick={() => setShowSqlSchemaModal(false)}
-                    className="px-4 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl font-bold text-xs transition-all cursor-pointer"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
+          {/* Backup & Cloud Timestamps */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-theme-page p-4 rounded-2xl border border-theme-border">
+            <div>
+              <span className="text-theme-secondary font-bold block text-[11px]">Last Local Backup:</span>
+              <span className="text-sm font-extrabold text-theme-main">
+                {lastBackup ? new Date(lastBackup).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : 'Ready to export'}
+              </span>
+            </div>
+            <div>
+              <span className="text-theme-secondary font-bold block text-[11px]">Cloud Sync Status:</span>
+              <span className="text-sm font-extrabold text-emerald-700 flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                {lastCloudSync ? `Synced (${new Date(lastCloudSync).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })})` : 'Synced & Ready'}
+              </span>
             </div>
           </div>
-        )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
-          {/* Export / Backup Column */}
-          <div className="bg-[#F8FAFC] border border-[#E8ECF3] rounded-2xl p-4 space-y-3">
-            <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
-              <Download className="w-4 h-4 text-indigo-600" />
-              <span>Export Encrypted Backup</span>
+          {/* Notices */}
+          {backupNotice && (
+            <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3.5 rounded-2xl flex items-center gap-2 text-xs font-bold">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{backupNotice}</span>
             </div>
-            <p className="text-slate-500 text-xs">
-              Downloads a full encrypted snapshot of patients, dental charts, EMR notes, prescriptions, invoices, and settings.
-            </p>
-            <div className="text-[11px] text-slate-500 font-medium">
-              Last Backup: <span className="font-bold text-slate-800">{lastBackup ? new Date(lastBackup).toLocaleString() : 'Never'}</span>
+          )}
+
+          {restoreSuccess && (
+            <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3.5 rounded-2xl flex items-center gap-2 text-xs font-bold">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{restoreSuccess}</span>
             </div>
+          )}
+
+          {restoreError && (
+            <div className="bg-rose-50 border border-rose-200 text-rose-800 p-3.5 rounded-2xl flex items-center gap-2 text-xs font-bold">
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>{restoreError}</span>
+            </div>
+          )}
+
+          {cloudRestoreMessage && (
+            <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 p-3.5 rounded-2xl flex items-center gap-2 text-xs font-bold">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{cloudRestoreMessage}</span>
+            </div>
+          )}
+
+          {/* Primary Action Buttons */}
+          <div className="flex flex-wrap items-center gap-3 pt-2">
             <button
               type="button"
-              onClick={handleDownloadBackup}
-              className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+              onClick={() => {
+                handleDownloadBackup();
+                handleManualCloudBackup();
+              }}
+              disabled={isCloudSyncing}
+              className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-bold text-xs shadow-md transition-all cursor-pointer flex items-center gap-2"
             >
               <Download className="w-4 h-4" />
-              <span>Download Encrypted Backup (.fabis)</span>
+              <span>Backup Now</span>
             </button>
-          </div>
 
-          {/* Import / Restore Column */}
-          <div className="bg-[#F8FAFC] border border-[#E8ECF3] rounded-2xl p-4 space-y-3">
-            <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
-              <UploadCloud className="w-4 h-4 text-emerald-600" />
-              <span>Restore Backup File</span>
-            </div>
-            <p className="text-slate-500 text-xs">
-              Select a `.fabis` encrypted backup file to restore complete clinical data to this system.
-            </p>
-            <label className="w-full py-2.5 px-4 bg-white border border-slate-300 hover:border-slate-400 text-slate-800 rounded-xl font-bold text-xs shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer text-center">
-              <UploadCloud className="w-4 h-4 text-slate-600" />
-              <span>Select Backup File to Restore</span>
+            <label className="px-6 py-3 bg-theme-card hover:bg-theme-page text-theme-main border border-theme-border hover:border-slate-400 rounded-2xl font-bold text-xs shadow-xs transition-all cursor-pointer flex items-center gap-2 text-center">
+              <UploadCloud className="w-4 h-4 text-indigo-600" />
+              <span>Restore Backup</span>
               <input
                 type="file"
                 accept=".fabis,.json"
@@ -1465,65 +1410,452 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 className="hidden"
               />
             </label>
-          </div>
-        </div>
 
-        {/* Restore Confirmation Dialog */}
-        {restoreCandidate && (
-          <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 space-y-3 mt-2">
-            <div className="flex items-center gap-2 text-amber-900 font-extrabold text-sm">
-              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
-              <span>Confirm Data Restore</span>
+            {activeRole === 'admin' && (
+              <button
+                type="button"
+                onClick={handleRestoreFromCloud}
+                disabled={isCloudSyncing}
+                className="px-5 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-2xl font-bold text-xs transition-all cursor-pointer flex items-center gap-2 shadow-xs disabled:opacity-50"
+              >
+                <RefreshCw className={`w-4 h-4 ${isCloudSyncing ? 'animate-spin' : ''}`} />
+                <span>Restore from Cloud</span>
+              </button>
+            )}
+          </div>
+
+          {/* Restore Confirmation Dialog */}
+          {restoreCandidate && (
+            <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 space-y-3 mt-4 animate-fadeIn">
+              <div className="flex items-center gap-2 text-amber-900 font-extrabold text-sm">
+                <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+                <span>Confirm Data Restore</span>
+              </div>
+              <p className="text-xs text-amber-800 font-medium">
+                This backup contains <strong className="text-amber-950">{restoreCandidate.patients.length} patient records</strong> from{' '}
+                <strong className="text-amber-950">{new Date(restoreCandidate.timestamp).toLocaleString()}</strong>.
+                Restoring will safely load records into your system.
+              </p>
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setRestoreCandidate(null)}
+                  className="px-4 py-2 rounded-xl border border-amber-300 text-amber-900 font-bold text-xs hover:bg-amber-100 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmRestore}
+                  className="px-5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <FileCheck className="w-4 h-4" />
+                  <span>Confirm & Restore</span>
+                </button>
+              </div>
             </div>
-            <p className="text-xs text-amber-800 font-medium">
-              This backup file contains <span className="font-bold text-amber-950">{restoreCandidate.patients.length} patient records</span> from{' '}
-              <span className="font-bold text-amber-950">{new Date(restoreCandidate.timestamp).toLocaleString()}</span>.
-              Restoring will merge and update system records safely.
+          )}
+        </div>
+      )}
+
+      {/* Admin Data Management Section (Permanent Patient Deletion & Supabase Config) */}
+      {activeSection === 'admin' && activeRole === 'admin' && (
+        <div className="space-y-6">
+          {/* Doctor Access & Developer Maintenance Mode Controls */}
+          <div className="bg-white p-6 sm:p-7 rounded-[28px] border border-indigo-200 shadow-[0_10px_30px_rgba(99,102,241,0.06)] space-y-6 text-xs text-[#1E293B]">
+            <div className="border-b border-indigo-100 pb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2.5 text-indigo-900 font-extrabold text-base">
+                <div className="p-2 rounded-xl bg-indigo-50 border border-indigo-200">
+                  <LockKeyhole className="w-5 h-5 text-indigo-600" />
+                </div>
+                <span>Doctor Access & Maintenance Controls</span>
+              </div>
+            </div>
+
+            <p className="text-slate-600 leading-relaxed">
+              Manage Doctor EMR portal access and Developer Maintenance mode. The software remains permanently usable unless Admin manually locks access. Administrator access is always unrestricted, and all patient records in Supabase remain intact and secure.
             </p>
-            <div className="flex items-center justify-end gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setRestoreCandidate(null)}
-                className="px-4 py-2 rounded-xl border border-amber-300 text-amber-900 font-bold text-xs hover:bg-amber-100 cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmRestore}
-                className="px-5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-xs flex items-center gap-1.5 cursor-pointer"
-              >
-                <FileCheck className="w-4 h-4" />
-                <span>Confirm & Restore All Data</span>
-              </button>
-            </div>
-          </div>
-        )}
 
-        {/* Backup Reminder Schedule Config */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-[#E8ECF3]">
-          <div className="flex items-center gap-2 text-slate-700 font-bold">
-            <Clock className="w-4 h-4 text-indigo-600" />
-            <span>Automated Backup Reminder Schedule:</span>
+            {lockStatusMessage && (
+              <div className="p-3.5 bg-indigo-50 border border-indigo-200 text-indigo-900 rounded-2xl font-bold flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
+                <span>{lockStatusMessage}</span>
+              </div>
+            )}
+
+            {/* Two Control Sections Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {/* Doctor Access Control Card */}
+              <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col justify-between space-y-4">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">Doctor Access</span>
+                    <span className={`px-3 py-1 rounded-full font-extrabold text-xs border flex items-center gap-1.5 ${
+                      softwareAccess?.doctorAccess === 'Locked'
+                        ? 'bg-rose-50 text-rose-800 border-rose-200'
+                        : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                    }`}>
+                      <span className={`w-2 h-2 rounded-full ${softwareAccess?.doctorAccess === 'Locked' ? 'bg-rose-600' : 'bg-emerald-600'}`} />
+                      <span>{softwareAccess?.doctorAccess === 'Locked' ? '🔴 Locked' : '🟢 Active'}</span>
+                    </span>
+                  </div>
+                  <p className="text-slate-500 text-[11px] leading-relaxed">
+                    When Locked, Doctor is prevented from accessing the EMR dashboard and patient records. Admin retains full control.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 pt-2 border-t border-slate-200">
+                  {softwareAccess?.doctorAccess === 'Locked' ? (
+                    <button
+                      type="button"
+                      disabled={isUpdatingLock}
+                      onClick={async () => {
+                        setIsUpdatingLock(true);
+                        try {
+                          await setDoctorAccessStatus('Active');
+                          await loadSoftwareAccessStatus();
+                          setLockStatusMessage('Doctor Access unlocked! Doctor can now log in normally.');
+                        } finally {
+                          setIsUpdatingLock(false);
+                        }
+                      }}
+                      className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-xs cursor-pointer flex items-center justify-center gap-2 transition-all"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Unlock Doctor Access</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={isUpdatingLock}
+                      onClick={() => setShowLockConfirmModal(true)}
+                      className="w-full py-2.5 px-4 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl shadow-xs cursor-pointer flex items-center justify-center gap-2 transition-all"
+                    >
+                      <LockKeyhole className="w-4 h-4" />
+                      <span>Lock Doctor Access</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Developer Maintenance Mode Card */}
+              <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col justify-between space-y-4">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">Developer Maintenance Mode</span>
+                    <span className={`px-3 py-1 rounded-full font-extrabold text-xs border flex items-center gap-1.5 ${
+                      softwareAccess?.maintenanceMode
+                        ? 'bg-amber-50 text-amber-800 border-amber-200'
+                        : 'bg-slate-100 text-slate-700 border-slate-200'
+                    }`}>
+                      <span className={`w-2 h-2 rounded-full ${softwareAccess?.maintenanceMode ? 'bg-amber-600 animate-pulse' : 'bg-slate-400'}`} />
+                      <span>{softwareAccess?.maintenanceMode ? 'ON' : 'OFF'}</span>
+                    </span>
+                  </div>
+                  <p className="text-slate-500 text-[11px] leading-relaxed">
+                    When ON, Doctor access is temporarily blocked with a clean 404 maintenance screen. Admin access remains completely unaffected.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 pt-2 border-t border-slate-200">
+                  {softwareAccess?.maintenanceMode ? (
+                    <button
+                      type="button"
+                      disabled={isUpdatingLock}
+                      onClick={async () => {
+                        setIsUpdatingLock(true);
+                        try {
+                          await setMaintenanceModeStatus(false);
+                          await loadSoftwareAccessStatus();
+                          setLockStatusMessage('Developer Maintenance Mode disabled.');
+                        } finally {
+                          setIsUpdatingLock(false);
+                        }
+                      }}
+                      className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-900 text-white font-extrabold text-xs rounded-xl shadow-xs cursor-pointer flex items-center justify-center gap-2 transition-all"
+                    >
+                      <span>Disable Maintenance Mode</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={isUpdatingLock}
+                      onClick={async () => {
+                        setIsUpdatingLock(true);
+                        try {
+                          await setMaintenanceModeStatus(true);
+                          await loadSoftwareAccessStatus();
+                          setLockStatusMessage('Developer Maintenance Mode enabled.');
+                        } finally {
+                          setIsUpdatingLock(false);
+                        }
+                      }}
+                      className="w-full py-2.5 px-4 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs rounded-xl shadow-xs cursor-pointer flex items-center justify-center gap-2 transition-all"
+                    >
+                      <AlertTriangle className="w-4 h-4" />
+                      <span>Enable Maintenance Mode</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Lock Confirmation Modal */}
+            {showLockConfirmModal && (
+              <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-sm w-full p-6 text-left space-y-4">
+                  <div className="flex items-center gap-2.5 text-rose-700 font-extrabold text-base">
+                    <div className="p-2 rounded-xl bg-rose-50 border border-rose-200">
+                      <LockKeyhole className="w-5 h-5 text-rose-600" />
+                    </div>
+                    <span>Lock Doctor Access?</span>
+                  </div>
+
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    The Doctor will temporarily be unable to access the EMR. Existing patient data will remain completely safe.
+                  </p>
+
+                  <div className="pt-2 flex items-center justify-end gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowLockConfirmModal(false)}
+                      className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isUpdatingLock}
+                      onClick={async () => {
+                        setIsUpdatingLock(true);
+                        try {
+                          await setDoctorAccessStatus('Locked');
+                          setShowLockConfirmModal(false);
+                          await loadSoftwareAccessStatus();
+                          setLockStatusMessage('Doctor Access is now Locked.');
+                        } finally {
+                          setIsUpdatingLock(false);
+                        }
+                      }}
+                      className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-xs cursor-pointer transition-all"
+                    >
+                      Lock Doctor
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-          <div className="flex items-center gap-2">
-            {(['daily', 'weekly', 'monthly', 'never'] as BackupFrequency[]).map((f) => (
-              <button
-                key={f}
-                type="button"
-                onClick={() => handleBackupFreqChange(f)}
-                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer capitalize ${
-                  backupFreq === f
-                    ? 'bg-indigo-600 text-white shadow-xs'
-                    : 'bg-[#F8FAFC] border border-[#E8ECF3] text-slate-600 hover:bg-slate-100'
-                }`}
-              >
-                {f}
-              </button>
-            ))}
+
+          {/* Permanent Patient Record Deletion Card */}
+          <div className="bg-white p-6 sm:p-7 rounded-[28px] border border-rose-200 shadow-[0_10px_30px_rgba(244,63,94,0.06)] space-y-5 text-xs text-[#1E293B]">
+            <div className="border-b border-rose-100 pb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2.5 text-rose-700 font-extrabold text-base">
+                <div className="p-2 rounded-xl bg-rose-50 border border-rose-200">
+                  <UserX className="w-5 h-5 text-rose-600" />
+                </div>
+                <span>Permanent Patient Record Deletion</span>
+              </div>
+              <span className="px-3 py-1 bg-rose-100 text-rose-800 rounded-full font-bold text-xs border border-rose-200">
+                ⚠️ Strict Admin Action
+              </span>
+            </div>
+
+            <p className="text-slate-600 leading-relaxed">
+              Select a patient to permanently wipe all associated clinical records (Dental Charts, Prescriptions, Appointments, and Invoices) from Supabase Cloud and local storage.
+            </p>
+
+            {deletionSuccessMessage && (
+              <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-2xl font-bold flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{deletionSuccessMessage}</span>
+              </div>
+            )}
+
+            {deletionErrorMessage && (
+              <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-900 rounded-2xl font-bold flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{deletionErrorMessage}</span>
+              </div>
+            )}
+
+            {/* Search & Patient Selector */}
+            <div className="space-y-3">
+              <label className="text-slate-900 font-bold block">1. Search & Select Patient to Delete</label>
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Search by Patient Name, ID (e.g. RK001), or Phone number..."
+                  value={patientSearchTerm}
+                  onChange={(e) => setPatientSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium focus:border-rose-500 outline-none transition-all"
+                />
+              </div>
+
+              {/* Patient List */}
+              <div className="max-h-48 overflow-y-auto space-y-1.5 border border-slate-200 rounded-2xl p-2 bg-slate-50/50">
+                {filteredPatients.length === 0 ? (
+                  <div className="text-center py-4 text-slate-400 font-medium">
+                    No matching patients found.
+                  </div>
+                ) : (
+                  filteredPatients.map(p => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedPatientToDelete(p);
+                        setDeleteConfirmInput('');
+                        setDeletionErrorMessage(null);
+                      }}
+                      className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between gap-3 transition-all cursor-pointer ${
+                        selectedPatientToDelete?.id === p.id
+                          ? 'border-rose-500 bg-rose-50 font-bold text-rose-900'
+                          : 'border-transparent hover:border-slate-300 bg-white text-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="font-mono text-xs px-2 py-0.5 rounded-md bg-slate-100 text-slate-700">
+                          {p.mrn || p.id}
+                        </span>
+                        <span className="font-extrabold text-xs">{p.name}</span>
+                        <span className="text-slate-400 text-[11px] font-normal">
+                          {p.age}y / {p.gender}
+                        </span>
+                      </div>
+                      <span className="text-slate-500 text-[11px]">{p.phone}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Selected Patient Deletion Confirmation Panel */}
+            {selectedPatientToDelete && (
+              <div className="p-5 rounded-2xl bg-rose-50 border-2 border-rose-300 space-y-4 animate-fadeIn">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <span className="font-extrabold text-sm text-rose-900 block">
+                      Confirm Permanent Deletion for {selectedPatientToDelete.name}
+                    </span>
+                    <span className="text-xs text-rose-700 font-medium block mt-0.5">
+                      Patient MRN: {selectedPatientToDelete.mrn} • Phone: {selectedPatientToDelete.phone}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPatientToDelete(null)}
+                    className="p-1 rounded-lg text-rose-400 hover:text-rose-700 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="p-3 bg-white/80 rounded-xl border border-rose-200 text-rose-900 text-xs space-y-1">
+                  <p className="font-bold flex items-center gap-1.5 text-rose-700">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    <span>Warning: This cannot be undone!</span>
+                  </p>
+                  <p className="text-[11px] text-rose-800">
+                    Deleting this patient permanently deletes their complete EMR history, all prescription records, dental examination charts, and treatment invoices.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-rose-900 font-bold block text-xs">
+                    Type <span className="font-mono bg-rose-200 px-1.5 py-0.5 rounded text-rose-900">{selectedPatientToDelete.patientId || 'DELETE'}</span> to confirm:
+                  </label>
+                  <div className="flex flex-col sm:flex-row items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder={`Type ${selectedPatientToDelete.patientId || 'DELETE'} here...`}
+                      value={deleteConfirmInput}
+                      onChange={(e) => setDeleteConfirmInput(e.target.value)}
+                      className="flex-1 w-full p-3 bg-white border border-rose-300 rounded-xl font-mono text-xs text-slate-900 focus:border-rose-600 outline-none uppercase"
+                    />
+                    <button
+                      type="button"
+                      disabled={isDeletingPatient}
+                      onClick={handleExecutePermanentDelete}
+                      className="w-full sm:w-auto px-6 py-3 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl shadow-md cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50 transition-all"
+                    >
+                      {isDeletingPatient ? (
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="w-4 h-4" />
+                      )}
+                      <span>Permanently Delete Patient</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Supabase Custom Config & Connection Testing */}
+          <div className="bg-white p-6 rounded-[28px] border border-[#E8ECF3] shadow-[0_10px_30px_rgba(0,0,0,0.03)] space-y-4 text-xs text-[#1E293B]">
+            <div className="border-b border-[#E8ECF3] pb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-indigo-700 font-bold text-base">
+                <Server className="w-5 h-5 text-indigo-600" />
+                <span>Supabase Cloud Database Settings</span>
+              </div>
+              <span className={`px-3 py-1 rounded-full font-bold text-xs border ${
+                supabaseTestResult?.connected 
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
+                  : 'bg-amber-50 text-amber-800 border-amber-200'
+              }`}>
+                {supabaseTestResult?.connected ? '● Cloud Connected' : '○ Standalone / Ready'}
+              </span>
+            </div>
+
+            <form onSubmit={handleSaveSupabaseSettings} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-slate-800 font-bold block mb-1">Supabase Project URL</label>
+                  <input
+                    type="url"
+                    placeholder="https://your-project.supabase.co"
+                    value={supabaseUrlInput}
+                    onChange={(e) => setSupabaseUrlInput(e.target.value)}
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs focus:border-indigo-600 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-slate-800 font-bold block mb-1">Supabase Anon Key</label>
+                  <input
+                    type="password"
+                    placeholder="eyJhbGciOi..."
+                    value={supabaseKeyInput}
+                    onChange={(e) => setSupabaseKeyInput(e.target.value)}
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs focus:border-indigo-600 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <button
+                  type="button"
+                  onClick={handleTestSupabaseConn}
+                  disabled={isTestingSupabase}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-bold text-xs flex items-center gap-2 cursor-pointer transition-colors"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isTestingSupabase ? 'animate-spin' : ''}`} />
+                  <span>Test Connection</span>
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={isTestingSupabase}
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs shadow-xs cursor-pointer"
+                >
+                  Save Supabase Config
+                </button>
+              </div>
+            </form>
           </div>
         </div>
-      </div>
       )}
     </div>
   );

@@ -1,6 +1,6 @@
 import React from 'react';
 import { DoctorProfile, Patient, UserRole } from '../types';
-import { getLastVisitAndTreatment } from '../utils/formatters';
+import { getLastVisitAndTreatment, formatPatientId } from '../utils/formatters';
 import { 
   UserPlus, 
   CalendarPlus, 
@@ -79,6 +79,8 @@ export const Header: React.FC<HeaderProps> = ({
       (p) =>
         p.name.toLowerCase().includes(q) ||
         p.mrn.toLowerCase().includes(q) ||
+        formatPatientId(p).toLowerCase().includes(q) ||
+        (p.id && p.id.toLowerCase().includes(q)) ||
         p.phone.includes(q)
     );
   }, [searchQuery, patients]);
@@ -95,7 +97,7 @@ export const Header: React.FC<HeaderProps> = ({
               <Search className="absolute left-3.5 w-4 h-4 text-theme-secondary pointer-events-none" />
               <input
                 type="text"
-                placeholder="Search patient, MRN, phone..."
+                placeholder="Search patient, Patient ID, phone..."
                 value={searchQuery}
                 onChange={(e) => {
                   onSearchChange(e.target.value);
@@ -116,7 +118,7 @@ export const Header: React.FC<HeaderProps> = ({
                 </div>
                 {filteredPatients.map((p) => {
                   const totalBalance = (p.invoices || []).reduce((sum, inv) => sum + inv.balanceDue, 0);
-                  const { lastVisitDate, lastTxName } = getLastVisitAndTreatment(p);
+                  const { lastVisitDate } = getLastVisitAndTreatment(p);
 
                   return (
                     <button
@@ -134,11 +136,15 @@ export const Header: React.FC<HeaderProps> = ({
                           <span className="text-theme-secondary font-normal text-[11px] shrink-0">({p.age}Y / {p.gender})</span>
                         </div>
                         <div className="text-[11px] text-theme-secondary flex items-center gap-1.5 flex-wrap mt-0.5 font-medium">
-                          <span>MRN: {p.mrn}</span>
+                          <span>Patient ID: {formatPatientId(p)}</span>
                           <span>•</span>
                           <span>Mob: {p.phone}</span>
-                          <span>•</span>
-                          <span>Last: {lastVisitDate}</span>
+                          {lastVisitDate !== 'No visits yet' && (
+                            <>
+                              <span>•</span>
+                              <span>Last: {lastVisitDate}</span>
+                            </>
+                          )}
                         </div>
                       </div>
                       <div className="text-right shrink-0">
@@ -177,9 +183,10 @@ export const Header: React.FC<HeaderProps> = ({
           {/* + Appointment */}
           <button
             onClick={() => onOpenBookAppointment()}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl bg-theme-card hover:bg-theme-page text-theme-main border border-theme-border shadow-2xs transition-all whitespace-nowrap active:scale-[0.98] cursor-pointer"
+            style={{ backgroundColor: '#30D5C8' }}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl hover:opacity-90 text-white shadow-xs transition-all whitespace-nowrap active:scale-[0.98] cursor-pointer"
           >
-            <CalendarPlus className="w-3.5 h-3.5 text-theme-accent shrink-0" />
+            <CalendarPlus className="w-3.5 h-3.5 text-white shrink-0" />
             <span>+ Appointment</span>
           </button>
 

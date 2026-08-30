@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Patient } from '../../types';
-import { formatCurrency, formatDate } from '../../utils/formatters';
+import { formatCurrency, formatDate, formatPatientId } from '../../utils/formatters';
 import { 
   Users, 
   Search, 
@@ -29,9 +29,12 @@ export const PatientDirectory: React.FC<PatientDirectoryProps> = ({
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
 
   const filtered = patients.filter((p) => {
+    const pId = formatPatientId(p).toLowerCase();
     const matchesSearch =
       p.name.toLowerCase().includes(search.toLowerCase()) ||
       p.mrn.toLowerCase().includes(search.toLowerCase()) ||
+      pId.includes(search.toLowerCase()) ||
+      (p.id && p.id.toLowerCase().includes(search.toLowerCase())) ||
       p.phone.includes(search);
 
     if (statusFilter === 'ALL') return matchesSearch;
@@ -46,13 +49,7 @@ export const PatientDirectory: React.FC<PatientDirectoryProps> = ({
           <h2 className="text-xl font-extrabold text-theme-main flex items-center gap-2.5">
             <Users className="w-6 h-6 text-theme-accent" />
             <span>Patient EMR Directory</span>
-            <span className="px-3 py-1 rounded-full text-xs font-bold bg-theme-accent/15 text-theme-accent border border-theme-accent/30">
-              {patients.length} Total Patients
-            </span>
           </h2>
-          <p className="text-sm font-medium text-theme-secondary mt-1">
-            Access longitudinal dental histories, teeth maps, treatment plans, prescriptions, and billing ledgers
-          </p>
         </div>
 
         <button
@@ -70,7 +67,7 @@ export const PatientDirectory: React.FC<PatientDirectoryProps> = ({
           <Search className="absolute left-4 top-3.5 w-5 h-5 text-theme-secondary pointer-events-none" />
           <input
             type="text"
-            placeholder="Search name, MRN, phone..."
+            placeholder="Search name, Patient ID, phone..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-11 pr-4 py-3 min-h-[44px] bg-theme-page border border-theme-border rounded-2xl text-sm text-theme-main placeholder-theme-secondary focus:outline-none focus:border-theme-accent transition-all font-semibold"
@@ -131,7 +128,7 @@ export const PatientDirectory: React.FC<PatientDirectoryProps> = ({
                       {patient.age}{patient.gender[0]}
                     </span>
                     <span className="text-xs font-mono text-theme-secondary whitespace-nowrap shrink-0">
-                      MRN: {patient.mrn}
+                      Patient ID: {formatPatientId(patient)}
                     </span>
                   </div>
                 </div>

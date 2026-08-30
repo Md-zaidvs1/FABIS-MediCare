@@ -3,6 +3,7 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { smsRouter } from "./server/smsRoutes.js";
+import { licenseRouter } from "./server/licenseRoutes.js";
 import { startSmsScheduler } from "./server/smsScheduler.js";
 
 async function startServer() {
@@ -17,6 +18,8 @@ async function startServer() {
   });
 
   app.use("/api/sms", smsRouter);
+  app.use("/api/software-status", licenseRouter);
+  app.use("/api/software-license", licenseRouter);
 
   // Vite middleware for development vs static build for production
   if (process.env.NODE_ENV !== "production") {

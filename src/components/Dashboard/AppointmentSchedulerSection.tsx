@@ -1,7 +1,13 @@
 // FABIS MediCare - Professional Hospital Appointment Scheduler & Live Timeline
 import React, { useState, useEffect, useMemo } from 'react';
 import { Patient, Appointment, UserRole } from '../../types';
-import { formatDate, formatTodayISO } from '../../utils/formatters';
+import {
+  formatDate,
+  formatTodayISO,
+  parseTimeToMinutes,
+  formatMinutesToTime,
+  normalizeTimeSlot,
+} from '../../utils/formatters';
 import {
   Calendar as CalendarIcon,
   ChevronLeft,
@@ -45,31 +51,7 @@ export type CalendarViewMode = 'Week' | 'Day' | 'Month';
 
 export type StatusCategory = 'Overdue' | 'Waiting' | 'In Treatment' | 'Checked Out' | 'Scheduled';
 
-export function parseTimeToMinutes(timeStr: string): number {
-  if (!timeStr) return 540;
-  const clean = timeStr.trim().toUpperCase();
-  const isPM = clean.includes('PM');
-  const isAM = clean.includes('AM');
-  const numericPart = clean.replace(/(AM|PM)/g, '').trim();
-  const parts = numericPart.split(':');
-  let hours = parseInt(parts[0], 10) || 9;
-  const minutes = parseInt(parts[1], 10) || 0;
-
-  if (isPM && hours < 12) hours += 12;
-  if (isAM && hours === 12) hours = 0;
-
-  return hours * 60 + minutes;
-}
-
-export function formatMinutesToTime(totalMinutes: number): string {
-  let hours = Math.floor(totalMinutes / 60);
-  const mins = totalMinutes % 60;
-  const period = hours >= 12 ? 'pm' : 'am';
-  if (hours > 12) hours -= 12;
-  if (hours === 0) hours = 12;
-  const minsStr = mins < 10 ? `0${mins}` : `${mins}`;
-  return `${hours}:${minsStr} ${period}`;
-}
+export { parseTimeToMinutes, formatMinutesToTime };
 
 export function parseDateInputToIso(inputStr: string): string | null {
   if (!inputStr) return null;
@@ -229,7 +211,7 @@ export const AppointmentSchedulerSection: React.FC<AppointmentSchedulerSectionPr
 
   // Extract all appointments from patients list
   const allAppointments = useMemo(() => {
-    return patients.flatMap((p) => p.appointments || []);
+    return (patients || []).flatMap((p) => p?.appointments || []);
   }, [patients]);
 
   // Filter appointments by search query across name, phone, MRN, date, procedure
@@ -238,22 +220,23 @@ export const AppointmentSchedulerSection: React.FC<AppointmentSchedulerSectionPr
     const q = searchQuery.trim().toLowerCase();
     return allAppointments.filter(
       (a) =>
-        a.patientName.toLowerCase().includes(q) ||
-        a.patientPhone.replace(/\D/g, '').includes(q) ||
-        a.procedure.toLowerCase().includes(q) ||
-        a.date.includes(q) ||
-        a.timeSlot.toLowerCase().includes(q)
+        a &&
+        ((a.patientName || '').toLowerCase().includes(q) ||
+        (a.patientPhone || '').replace(/\D/g, '').includes(q) ||
+        (a.procedure || '').toLowerCase().includes(q) ||
+        (a.date && a.date.includes(q)) ||
+        (a.timeSlot || '').toLowerCase().includes(q))
     );
   }, [allAppointments, searchQuery]);
 
   // Filter appointments for selected date
   const selectedDateAppointments = useMemo(() => {
-    return filteredAllAppointments.filter((apt) => apt.date === selectedDate);
+    return filteredAllAppointments.filter((apt) => apt && apt.date === selectedDate);
   }, [filteredAllAppointments, selectedDate]);
 
   // Automated Metrics calculation (Current Patient, Next Patient, Overdue Count, Wait Time)
   const automatedMetrics = useMemo(() => {
-    const todayAppts = allAppointments.filter((a) => a.date === selectedDate);
+    const todayAppts = allAppointments.filter((a) => a && a.date === selectedDate);
 
     // Current Patient in chair
     const currentInChair = todayAppts.find(

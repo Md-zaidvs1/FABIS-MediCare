@@ -20,7 +20,7 @@ interface InternalFollowUpTriggerProps {
 export const InternalFollowUpTrigger: React.FC<InternalFollowUpTriggerProps> = ({
   initialReason = 'Check post-op healing & swelling',
   onChange,
-  title = 'Internal Doctor Alert / Follow-Up',
+  title = 'Follow-Up',
   compact = false,
 }) => {
   const [enabled, setEnabled] = useState<boolean>(true);
@@ -74,9 +74,6 @@ export const InternalFollowUpTrigger: React.FC<InternalFollowUpTriggerProps> = (
             <h4 className="text-xs font-black uppercase tracking-wider text-amber-900">
               {title}
             </h4>
-            <p className="text-[11px] text-amber-700 font-medium">
-              Private doctor alert for internal clinical review (No SMS sent to patient)
-            </p>
           </div>
         </div>
 
@@ -100,7 +97,7 @@ export const InternalFollowUpTrigger: React.FC<InternalFollowUpTriggerProps> = (
           <div>
             <label className="text-[11px] font-bold text-amber-900 block mb-1.5 flex items-center gap-1">
               <Clock className="w-3.5 h-3.5 text-amber-700" />
-              <span>Select Alert Schedule Preset:</span>
+              <span>Schedule</span>
             </label>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <button
@@ -172,7 +169,7 @@ export const InternalFollowUpTrigger: React.FC<InternalFollowUpTriggerProps> = (
 
             <div className="sm:col-span-8">
               <label className="text-[11px] font-bold text-amber-900 block mb-1">
-                Clinical Reason for Doctor Alert
+                Clinical Reason
               </label>
               <input
                 type="text"
@@ -204,9 +201,8 @@ export const InternalFollowUpTrigger: React.FC<InternalFollowUpTriggerProps> = (
           <div className="p-2.5 bg-white/80 rounded-xl border border-amber-200 flex items-center justify-between text-xs text-amber-900 font-bold">
             <div className="flex items-center gap-1.5">
               <Calendar className="w-4 h-4 text-amber-600" />
-              <span>Scheduled Alert: <span className="text-amber-800 underline">{formatDate(dueDate)}</span></span>
+              <span>Scheduled: <span className="text-amber-800 underline">{formatDate(dueDate)}</span></span>
             </div>
-            <span className="text-[11px] text-amber-700 font-mono">Private Internal Alert</span>
           </div>
         </div>
       )}

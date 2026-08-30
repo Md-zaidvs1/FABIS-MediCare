@@ -1,6 +1,6 @@
 import { Patient, DoctorProfile, UserRole, UserCredentials, ThemePalette, VitalsLogRecord, ChairStatus, DashboardPersonalizationSettings } from '../types';
 import { INITIAL_PATIENTS, DEFAULT_DOCTOR, INITIAL_CHAIR_STATUSES } from '../data/initialData';
-import { formatTodayISO } from './formatters';
+import { formatTodayISO, normalizeTimeSlot } from './formatters';
 
 const STORAGE_KEYS = {
   PATIENTS: 'fabis_medicare_patients_v1',
@@ -19,12 +19,18 @@ const STORAGE_KEYS = {
   CUSTOM_BILL_TEMPLATES: 'fabis_medicare_custom_bill_templates_v1',
   CUSTOM_CLINIC_LOGO: 'customClinicLogo',
   CUSTOM_APP_ICON: 'customAppIcon',
+  CUSTOM_DOCTOR_SIGNATURE: 'customDoctorSignature',
+  CUSTOM_CLINIC_STAMP: 'customClinicStamp',
   CHAIRS: 'fabis_medicare_chairs_v1',
   DASHBOARD_SETTINGS: 'fabis_medicare_dashboard_settings_v1',
   SMS_SETTINGS: 'fabis_medicare_sms_gateway_v1',
   SMS_LOGS: 'fabis_medicare_sms_logs_v1',
   SMS_TEMPLATES: 'fabis_medicare_sms_templates_v1',
   SMS_FOLLOWUPS: 'fabis_medicare_sms_followups_v1',
+  CUSTOM_MEDICAL_CONDITIONS: 'fabis_medicare_custom_medical_conditions_v1',
+  CUSTOM_EXAM_FINDINGS: 'fabis_medicare_custom_exam_findings_v1',
+  CUSTOM_RECESSION_TAGS: 'fabis_medicare_custom_recession_tags_v1',
+  CUSTOM_PERIODONTAL_FINDINGS: 'fabis_medicare_custom_periodontal_findings_v1',
 };
 
 export const DEFAULT_DASHBOARD_SETTINGS: DashboardPersonalizationSettings = {
@@ -125,13 +131,37 @@ export const saveStoredRole = (role: UserRole): void => {
 export const getStoredTheme = (): ThemePalette => {
   try {
     const theme = localStorage.getItem(STORAGE_KEYS.THEME) as ThemePalette;
-    if (['royal-navy', 'emerald-gold', 'sapphire-ice', 'sage-stone', 'midnight-obsidian'].includes(theme)) {
+    if ([
+      'lavender-dream',
+      'sage-harmony',
+      'ocean-breeze',
+      'sunset-glow',
+      'blush-elegance',
+      'teal-serenity',
+      'amber-luxe',
+      'indigo-night',
+      'coral-crush',
+      'mocha-minimal',
+      'emerald-green',
+      'ocean-blue',
+      'royal-purple',
+      'deep-wine',
+      'slate-dark',
+      'rose-gold',
+      'midnight-blue',
+      'sunset-orange',
+      'royal-navy',
+      'emerald-gold',
+      'sapphire-ice',
+      'sage-stone',
+      'midnight-obsidian'
+    ].includes(theme)) {
       return theme;
     }
   } catch (err) {
     console.error('Error reading theme storage', err);
   }
-  return 'royal-navy';
+  return 'lavender-dream';
 };
 
 export const saveStoredTheme = (theme: ThemePalette): void => {
@@ -153,59 +183,108 @@ export const getStoredDoctor = (): DoctorProfile => {
   try {
     const data = localStorage.getItem(STORAGE_KEYS.DOCTOR);
     const customLogo = getStoredCustomClinicLogo();
+    const customSignature = getStoredCustomDoctorSignature();
+    const customStamp = getStoredCustomClinicStamp();
     if (data) {
       const parsed = JSON.parse(data);
-      if (customLogo) {
-        parsed.logoUrl = customLogo;
-      }
+      if (customLogo) parsed.logoUrl = customLogo;
+      if (customSignature) parsed.signatureUrl = customSignature;
+      if (customStamp) parsed.stampUrl = customStamp;
       return parsed;
     }
   } catch (err) {
     console.error('Error reading doctor storage', err);
   }
   const customLogo = getStoredCustomClinicLogo();
-  return customLogo ? { ...DEFAULT_DOCTOR, logoUrl: customLogo } : DEFAULT_DOCTOR;
+  const customSignature = getStoredCustomDoctorSignature();
+  const customStamp = getStoredCustomClinicStamp();
+  return {
+    ...DEFAULT_DOCTOR,
+    logoUrl: customLogo || undefined,
+    signatureUrl: customSignature || undefined,
+    stampUrl: customStamp || undefined,
+  };
 };
 
 export const saveDoctor = (doctor: DoctorProfile): void => {
   try {
     const customLogo = doctor.logoUrl || getStoredCustomClinicLogo();
-    const updatedDoctor = { ...doctor, logoUrl: customLogo || undefined };
+    const customSignature = doctor.signatureUrl || getStoredCustomDoctorSignature();
+    const customStamp = doctor.stampUrl || getStoredCustomClinicStamp();
+    const updatedDoctor = {
+      ...doctor,
+      logoUrl: customLogo || undefined,
+      signatureUrl: customSignature || undefined,
+      stampUrl: customStamp || undefined,
+    };
     localStorage.setItem(STORAGE_KEYS.DOCTOR, JSON.stringify(updatedDoctor));
     if (doctor.logoUrl) {
       saveCustomClinicLogo(doctor.logoUrl);
     }
+    if (doctor.signatureUrl) {
+      saveCustomDoctorSignature(doctor.signatureUrl);
+    }
+    if (doctor.stampUrl) {
+      saveCustomClinicStamp(doctor.stampUrl);
+    }
+    window.dispatchEvent(new Event('doctor-profile-updated'));
   } catch (err) {
     console.error('Error saving doctor storage', err);
   }
 };
 
+export const normalizePatient = (p: any): Patient => {
+  if (!p || typeof p !== 'object') return p;
+  const raw = p.data && typeof p.data === 'object' ? { ...p.data, ...p } : p;
+  const rawAppointments = Array.isArray(raw.appointments)
+    ? raw.appointments
+    : Array.isArray(p.data?.appointments)
+    ? p.data.appointments
+    : [];
+
+  const normalizedAppointments = rawAppointments.map((apt: any) => {
+    if (!apt || typeof apt !== 'object') return apt;
+    return {
+      ...apt,
+      timeSlot: normalizeTimeSlot(apt.timeSlot),
+    };
+  });
+
+  return {
+    ...raw,
+    name: raw.name || '',
+    phone: raw.phone || '',
+    mrn: raw.mrn || raw.id || '',
+    appointments: normalizedAppointments,
+    prescriptions: Array.isArray(raw.prescriptions) ? raw.prescriptions : (Array.isArray(p.data?.prescriptions) ? p.data.prescriptions : []),
+    invoices: Array.isArray(raw.invoices) ? raw.invoices : (Array.isArray(p.data?.invoices) ? p.data.invoices : []),
+    treatmentPlans: Array.isArray(raw.treatmentPlans) ? raw.treatmentPlans : (Array.isArray(p.data?.treatmentPlans) ? p.data.treatmentPlans : []),
+    followUps: Array.isArray(raw.followUps) ? raw.followUps : (Array.isArray(p.data?.followUps) ? p.data.followUps : []),
+    visitHistory: Array.isArray(raw.visitHistory) ? raw.visitHistory : (Array.isArray(p.data?.visitHistory) ? p.data.visitHistory : []),
+    media: Array.isArray(raw.media) ? raw.media : (Array.isArray(p.data?.media) ? p.data.media : []),
+    teethMap: raw.teethMap && typeof raw.teethMap === 'object' ? raw.teethMap : (p.data?.teethMap && typeof p.data?.teethMap === 'object' ? p.data.teethMap : {}),
+  };
+};
+
 export const getStoredPatients = (): Patient[] => {
   try {
     const data = localStorage.getItem(STORAGE_KEYS.PATIENTS);
-    if (data) {
+    if (data !== null) {
       const parsed = JSON.parse(data);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const todayIso = formatTodayISO();
-        const storedTodayAptsCount = parsed
-          .flatMap((p: Patient) => p.appointments || [])
-          .filter((a: any) => a.date === todayIso).length;
-        if (storedTodayAptsCount === 10) {
-          return parsed;
-        }
+      if (Array.isArray(parsed)) {
+        return parsed.map(normalizePatient);
       }
     }
   } catch (err) {
     console.error('Error reading patients storage', err);
   }
-  // Default fallback or auto-refresh for 10 dummy appointments testing
-  savePatients(INITIAL_PATIENTS);
-  return INITIAL_PATIENTS;
+  return [];
 };
 
 export const savePatients = (patients: Patient[]): void => {
   try {
     localStorage.setItem(STORAGE_KEYS.PATIENTS, JSON.stringify(patients));
+    window.dispatchEvent(new Event('patients-updated'));
   } catch (err) {
     console.error('Error saving patients storage', err);
   }
@@ -344,6 +423,103 @@ export const saveCustomMedicines = (list: any[]): void => {
   }
 };
 
+export const DEFAULT_MEDICAL_CONDITIONS = ['Diabetes', 'Blood Pressure / Hypertension'];
+
+export const getStoredCustomMedicalConditions = (): string[] => {
+  try {
+    const data = localStorage.getItem(STORAGE_KEYS.CUSTOM_MEDICAL_CONDITIONS);
+    if (data) {
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (err) {
+    console.error('Error reading custom medical conditions storage', err);
+  }
+  return DEFAULT_MEDICAL_CONDITIONS;
+};
+
+export const saveCustomMedicalConditions = (conditions: string[]): void => {
+  try {
+    localStorage.setItem(STORAGE_KEYS.CUSTOM_MEDICAL_CONDITIONS, JSON.stringify(conditions));
+  } catch (err) {
+    console.error('Error saving custom medical conditions storage', err);
+  }
+};
+
+export const DEFAULT_CLINICAL_EXAM_FINDINGS = ['Decay', 'Filling', 'Missing'];
+
+export const getStoredCustomExamFindings = (): string[] => {
+  try {
+    const data = localStorage.getItem(STORAGE_KEYS.CUSTOM_EXAM_FINDINGS);
+    if (data) {
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (err) {
+    console.error('Error reading custom exam findings storage', err);
+  }
+  return DEFAULT_CLINICAL_EXAM_FINDINGS;
+};
+
+export const saveCustomExamFindings = (findings: string[]): void => {
+  try {
+    localStorage.setItem(STORAGE_KEYS.CUSTOM_EXAM_FINDINGS, JSON.stringify(findings));
+  } catch (err) {
+    console.error('Error saving custom exam findings storage', err);
+  }
+};
+
+export const DEFAULT_RECESSION_TAGS = [
+  'Miller Class I',
+  'Generalized',
+  'Mandibular Anterior',
+  'Buccal Aspect',
+];
+
+export const getStoredCustomRecessionTags = (): string[] => {
+  try {
+    const data = localStorage.getItem(STORAGE_KEYS.CUSTOM_RECESSION_TAGS);
+    if (data) {
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (err) {
+    console.error('Error reading custom recession tags storage', err);
+  }
+  return DEFAULT_RECESSION_TAGS;
+};
+
+export const saveCustomRecessionTags = (tags: string[]): void => {
+  try {
+    localStorage.setItem(STORAGE_KEYS.CUSTOM_RECESSION_TAGS, JSON.stringify(tags));
+  } catch (err) {
+    console.error('Error saving custom recession tags storage', err);
+  }
+};
+
+export const DEFAULT_PERIODONTAL_FINDINGS: string[] = [];
+
+export const getStoredCustomPeriodontalFindings = (): string[] => {
+  try {
+    const data = localStorage.getItem(STORAGE_KEYS.CUSTOM_PERIODONTAL_FINDINGS);
+    if (data) {
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    console.error('Error reading custom periodontal findings storage', err);
+  }
+  return DEFAULT_PERIODONTAL_FINDINGS;
+};
+
+export const saveCustomPeriodontalFindings = (findings: string[]): void => {
+  try {
+    localStorage.setItem(STORAGE_KEYS.CUSTOM_PERIODONTAL_FINDINGS, JSON.stringify(findings));
+  } catch (err) {
+    console.error('Error saving custom periodontal findings storage', err);
+  }
+};
+
 export interface BillTemplateItem {
   id: string;
   name: string;
@@ -443,14 +619,137 @@ export const saveCustomAppIcon = (iconBase64: string | null): void => {
   }
 };
 
+export const getStoredCustomDoctorSignature = (): string | null => {
+  try {
+    return localStorage.getItem('customDoctorSignature') || localStorage.getItem(STORAGE_KEYS.CUSTOM_DOCTOR_SIGNATURE);
+  } catch (err) {
+    console.error('Error reading custom doctor signature', err);
+    return null;
+  }
+};
+
+export const saveCustomDoctorSignature = (sigBase64: string | null): void => {
+  try {
+    if (sigBase64) {
+      localStorage.setItem('customDoctorSignature', sigBase64);
+      localStorage.setItem(STORAGE_KEYS.CUSTOM_DOCTOR_SIGNATURE, sigBase64);
+      const data = localStorage.getItem(STORAGE_KEYS.DOCTOR);
+      if (data) {
+        const parsed = JSON.parse(data);
+        parsed.signatureUrl = sigBase64;
+        localStorage.setItem(STORAGE_KEYS.DOCTOR, JSON.stringify(parsed));
+      }
+    } else {
+      localStorage.removeItem('customDoctorSignature');
+      localStorage.removeItem(STORAGE_KEYS.CUSTOM_DOCTOR_SIGNATURE);
+      const data = localStorage.getItem(STORAGE_KEYS.DOCTOR);
+      if (data) {
+        const parsed = JSON.parse(data);
+        delete parsed.signatureUrl;
+        localStorage.setItem(STORAGE_KEYS.DOCTOR, JSON.stringify(parsed));
+      }
+    }
+    window.dispatchEvent(new Event('custom-branding-updated'));
+  } catch (err) {
+    console.error('Error saving custom doctor signature', err);
+  }
+};
+
+export const getStoredCustomClinicStamp = (): string | null => {
+  try {
+    return localStorage.getItem('customClinicStamp') || localStorage.getItem(STORAGE_KEYS.CUSTOM_CLINIC_STAMP);
+  } catch (err) {
+    console.error('Error reading custom clinic stamp', err);
+    return null;
+  }
+};
+
+export const saveCustomClinicStamp = (stampBase64: string | null): void => {
+  try {
+    if (stampBase64) {
+      localStorage.setItem('customClinicStamp', stampBase64);
+      localStorage.setItem(STORAGE_KEYS.CUSTOM_CLINIC_STAMP, stampBase64);
+      const data = localStorage.getItem(STORAGE_KEYS.DOCTOR);
+      if (data) {
+        const parsed = JSON.parse(data);
+        parsed.stampUrl = stampBase64;
+        localStorage.setItem(STORAGE_KEYS.DOCTOR, JSON.stringify(parsed));
+      }
+    } else {
+      localStorage.removeItem('customClinicStamp');
+      localStorage.removeItem(STORAGE_KEYS.CUSTOM_CLINIC_STAMP);
+      const data = localStorage.getItem(STORAGE_KEYS.DOCTOR);
+      if (data) {
+        const parsed = JSON.parse(data);
+        delete parsed.stampUrl;
+        localStorage.setItem(STORAGE_KEYS.DOCTOR, JSON.stringify(parsed));
+      }
+    }
+    window.dispatchEvent(new Event('custom-branding-updated'));
+  } catch (err) {
+    console.error('Error saving custom clinic stamp', err);
+  }
+};
+
+export const deletePatientPermanently = async (patientId: string): Promise<boolean> => {
+  try {
+    const currentPatients = getStoredPatients();
+    const target = currentPatients.find(p => p.id === patientId || p.mrn === patientId);
+    if (!target) return false;
+
+    const remaining = currentPatients.filter(p => p.id !== target.id && p.mrn !== target.mrn);
+    savePatients(remaining);
+
+    // Delete from Supabase multi-tenant database table
+    try {
+      const { deleteClinicRecord } = await import('./supabaseMultiTenant');
+      await deleteClinicRecord('patients', target.id);
+    } catch (sbErr) {
+      console.warn('Supabase deleteClinicRecord note:', sbErr);
+    }
+
+    // Sync cloud backup snapshot
+    try {
+      const { performSupabaseCloudBackup } = await import('./supabaseCloudBackup');
+      await performSupabaseCloudBackup();
+    } catch (cbErr) {
+      console.warn('Cloud backup sync note after deletion:', cbErr);
+    }
+
+    // Dual save in IndexedDB
+    try {
+      const { dualSaveSnapshot } = await import('./indexedDBStorage');
+      await dualSaveSnapshot(remaining);
+    } catch (idbErr) {
+      console.warn('IndexedDB snapshot update note:', idbErr);
+    }
+
+    window.dispatchEvent(new Event('patients-updated'));
+    return true;
+  } catch (err) {
+    console.error('Error deleting patient permanently:', err);
+    return false;
+  }
+};
+
 export const resetCustomBranding = (): void => {
   saveCustomClinicLogo(null);
   saveCustomAppIcon(null);
+  saveCustomDoctorSignature(null);
+  saveCustomClinicStamp(null);
 };
 
 export const resetToDemoData = (): { doctor: DoctorProfile; patients: Patient[] } => {
   const preservedLogo = getStoredCustomClinicLogo();
   const preservedIcon = getStoredCustomAppIcon();
+
+  // 1. Create emergency pre-reset snapshot for data protection safety
+  try {
+    const currentPatients = localStorage.getItem(STORAGE_KEYS.PATIENTS);
+    if (currentPatients) {
+      localStorage.setItem('fabis_emergency_pre_reset_backup', currentPatients);
+    }
+  } catch {}
 
   localStorage.removeItem(STORAGE_KEYS.PATIENTS);
   localStorage.removeItem(STORAGE_KEYS.DOCTOR);
@@ -461,6 +760,10 @@ export const resetToDemoData = (): { doctor: DoctorProfile; patients: Patient[] 
   localStorage.removeItem(STORAGE_KEYS.DELETED_PREDEFINED_MEDICINES);
   localStorage.removeItem(STORAGE_KEYS.CUSTOM_MEDICINES);
   localStorage.removeItem(STORAGE_KEYS.CHAIRS);
+  localStorage.removeItem(STORAGE_KEYS.VITALS_LOGS);
+  try {
+    localStorage.setItem('fabis_last_rk_sequence', '890');
+  } catch {}
 
   savePatients(INITIAL_PATIENTS);
 
@@ -499,27 +802,6 @@ export const formatCurrentTimestamp = (): string => {
   return `${datePart}, ${timePart}`;
 };
 
-const getDefaultInitialVitalsLogs = (patientMrn: string): VitalsLogRecord[] => {
-  return [
-    {
-      id: `vit-init-1-${patientMrn}`,
-      patientMrn,
-      timestamp: '28 Jul 2026, 11:30 AM',
-      bloodPressure: '120/80',
-      pulseRate: 72,
-      bloodSugar: '102 mg/dL',
-    },
-    {
-      id: `vit-init-2-${patientMrn}`,
-      patientMrn,
-      timestamp: '15 May 2026, 03:15 PM',
-      bloodPressure: '124/82',
-      pulseRate: 76,
-      bloodSugar: '110 mg/dL',
-    },
-  ];
-};
-
 export const getStoredVitalsLogs = (patientMrn: string): VitalsLogRecord[] => {
   try {
     const data = localStorage.getItem(STORAGE_KEYS.VITALS_LOGS);
@@ -532,16 +814,7 @@ export const getStoredVitalsLogs = (patientMrn: string): VitalsLogRecord[] => {
   } catch (err) {
     console.error('Error reading vitals logs', err);
   }
-  const defaults = getDefaultInitialVitalsLogs(patientMrn);
-  try {
-    const allData = localStorage.getItem(STORAGE_KEYS.VITALS_LOGS);
-    const map = allData ? JSON.parse(allData) : {};
-    map[patientMrn] = defaults;
-    localStorage.setItem(STORAGE_KEYS.VITALS_LOGS, JSON.stringify(map));
-  } catch (err) {
-    console.error('Error initializing vitals logs defaults', err);
-  }
-  return defaults;
+  return [];
 };
 
 export const saveVitalsLogForPatient = (patientMrn: string, newLog: VitalsLogRecord): VitalsLogRecord[] => {

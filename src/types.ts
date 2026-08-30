@@ -3,6 +3,7 @@ export type Gender = 'Male' | 'Female' | 'Other';
 export type ToothCondition = 
   | 'Healthy' 
   | 'Caries' 
+  | 'Filling'
   | 'RCT_Needed' 
   | 'RCT_Done' 
   | 'Crown' 
@@ -58,6 +59,7 @@ export interface Vitals {
   pulseRate?: number;
   bloodSugar?: string;
   spO2?: number;
+  temperature?: number;
   weightKg?: number;
   updatedAt?: string;
 }
@@ -233,13 +235,22 @@ export interface VisitRecord {
   date: string;
   chiefComplaint?: string;
   diagnosis?: string;
-  procedures: string[];
+  procedures?: string[];
   toothNumbers?: number[];
   prescriptionId?: string;
   invoiceId?: string;
-  totalCost: number;
-  paymentStatus: 'Paid' | 'Partial' | 'Unpaid';
+  totalCost?: number;
+  paymentStatus?: 'Paid' | 'Partial' | 'Unpaid';
   notes?: string;
+  vitals?: Vitals;
+  medicalConditions?: { condition: string; hasCondition: boolean }[];
+  dentalHistory?: string;
+  clinicalFindings?: string[];
+  calculus?: '+' | '++' | '+++' | null;
+  stains?: '+' | '++' | '+++' | null;
+  gingivalRecession?: string;
+  toothFindings?: { toothNumber: number; fdiNumber: number; condition: ToothCondition; notes?: string }[];
+  treatmentPlanText?: string;
 }
 
 export interface Patient {
@@ -249,6 +260,7 @@ export interface Patient {
   age: number;
   gender: Gender;
   phone: string;
+  email?: string;
   streetAddress?: string;
   cityArea?: string;
   pincode?: string;
@@ -321,6 +333,24 @@ export interface UserCredentials {
 }
 
 export type ThemePalette = 
+  | 'lavender-dream'
+  | 'sage-harmony'
+  | 'ocean-breeze'
+  | 'sunset-glow'
+  | 'blush-elegance'
+  | 'teal-serenity'
+  | 'amber-luxe'
+  | 'indigo-night'
+  | 'coral-crush'
+  | 'mocha-minimal'
+  | 'emerald-green' 
+  | 'ocean-blue' 
+  | 'royal-purple' 
+  | 'deep-wine' 
+  | 'slate-dark' 
+  | 'rose-gold' 
+  | 'midnight-blue' 
+  | 'sunset-orange'
   | 'royal-navy' 
   | 'emerald-gold' 
   | 'sapphire-ice' 
@@ -335,11 +365,16 @@ export interface DoctorProfile {
   title: string;
   regNumber: string;
   clinicName: string;
+  clinicDisplayName?: string; // Main clinic heading displayed in the sidebar
   clinicAddress: string;
   clinicPhone: string;
   clinicEmail: string;
   website?: string;
-  gstin?: string;
+  signatureUrl?: string; // Doctor Signature Image (PNG / Base64 / URL)
+  stampUrl?: string; // Clinic Stamp Image (PNG / Base64 / URL)
+  gstin?: string; // GST Number / GSTIN
+  gstRegisteredName?: string; // Optional GST Registered Name
+  gstAddress?: string; // Optional GST Address
   currencySymbol: string;
   logoUrl?: string;
 }

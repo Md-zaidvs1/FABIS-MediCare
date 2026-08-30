@@ -117,32 +117,40 @@ export const PrintWorkflowModal: React.FC<PrintWorkflowModalProps> = ({
     }, 300);
   };
 
-  // Send WhatsApp Action (Zero extra confirmation)
+  // Send WhatsApp Action
   const handleSendWhatsapp = async () => {
-    setStatusMessage('Generating PDF & initiating WhatsApp transmission...');
+    setStatusMessage('Generating PDF & opening share...');
     try {
+      let res;
       if (prescription) {
-        await sharePrescriptionPdf({
+        res = await sharePrescriptionPdf({
           rx: prescription,
           doctor,
           patient,
         });
       } else if (invoice) {
-        await shareInvoicePdf({
+        res = await shareInvoicePdf({
           invoice,
           doctor,
           patient,
           format: whatsappFormat,
         });
       }
-      setStatusMessage('WhatsApp transmission initiated successfully!');
+
+      if (res?.method === 'native') {
+        setStatusMessage('Document shared via device share sheet');
+      } else {
+        setStatusMessage(null);
+      }
+
       setTimeout(() => {
         setStatusMessage(null);
         onClose();
-      }, 1200);
+      }, 1000);
     } catch (err: any) {
-      console.error('Error sending via WhatsApp:', err);
-      setStatusMessage('Error generating WhatsApp PDF');
+      console.error('Error sharing via WhatsApp:', err);
+      setStatusMessage('Error generating document');
+      setTimeout(() => setStatusMessage(null), 2000);
     }
   };
 

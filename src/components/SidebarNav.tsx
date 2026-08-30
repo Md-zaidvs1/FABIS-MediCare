@@ -69,7 +69,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
     });
   };
 
-  const navItems: { id: NavigationTab; label: string; icon: React.ComponentType<{ className?: string }>; badge?: string | number }[] = [
+  const navItems: { id: NavigationTab; label: string; icon: React.ComponentType<{ className?: string }>; badge?: string | number; isPrimary?: boolean }[] = [
     {
       id: 'dashboard',
       label: 'Dashboard',
@@ -80,6 +80,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
       label: 'Patients',
       icon: Users,
       badge: totalPatientsCount,
+      isPrimary: true,
     },
     {
       id: 'appointments',
@@ -89,22 +90,12 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
     },
     {
       id: 'billing',
-      label: 'Bill History',
+      label: 'Billing History',
       icon: Receipt,
     },
     {
-      id: 'prescriptions',
-      label: 'Prescriptions',
-      icon: FileSpreadsheet,
-    },
-    {
-      id: 'sms',
-      label: 'SMS Center',
-      icon: MessageSquare,
-    },
-    {
       id: 'settings',
-      label: 'Settings',
+      label: 'Setting',
       icon: Settings,
     },
   ];
@@ -145,14 +136,26 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
             </div>
             
             {!isCollapsed && (
-              <div className="hidden md:block min-w-0">
-                <div className="flex items-center gap-1">
-                  <span className="text-theme-primary font-extrabold text-base tracking-tight uppercase">FABIS</span>
-                  <span className="text-theme-accent font-extrabold text-base tracking-tight">MediCare</span>
+              <div className="hidden md:block min-w-0 flex-1">
+                <div className="flex flex-col">
+                  {doctor?.clinicDisplayName && doctor.clinicDisplayName.trim() ? (
+                    <span className="text-theme-primary font-extrabold text-xs lg:text-sm tracking-tight leading-tight break-words" title={doctor.clinicDisplayName}>
+                      {doctor.clinicDisplayName}
+                    </span>
+                  ) : doctor?.clinicName && doctor.clinicName.trim() ? (
+                    <span className="text-theme-primary font-extrabold text-xs lg:text-sm tracking-tight leading-tight break-words" title={doctor.clinicName}>
+                      {doctor.clinicName}
+                    </span>
+                  ) : (
+                    <div className="flex items-center gap-1">
+                      <span className="text-theme-primary font-extrabold text-sm lg:text-base tracking-tight uppercase">FABIS</span>
+                      <span className="text-theme-accent font-extrabold text-sm lg:text-base tracking-tight">MediCare</span>
+                    </div>
+                  )}
+                  <span className="text-[9px] font-extrabold text-theme-secondary uppercase tracking-widest mt-0.5">
+                    DENTAL EMR
+                  </span>
                 </div>
-                <span className="text-[9px] font-bold text-theme-secondary uppercase tracking-[0.18em] block -mt-0.5">
-                  DENTAL EMR
-                </span>
               </div>
             )}
           </div>
@@ -168,10 +171,27 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
         </div>
 
         {/* Nav Links */}
-        <div className="flex md:flex-col gap-1 overflow-x-auto pb-1 md:pb-0 touch-manipulation">
+        <div className="flex md:flex-col gap-1.5 overflow-x-auto pb-1 md:pb-0 touch-manipulation">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
+            const isPrimary = item.isPrimary;
+
+            let buttonStyles = '';
+            if (isPrimary) {
+              if (isActive) {
+                buttonStyles = 'bg-theme-accent text-white shadow-sm border-l-4 border-white font-extrabold ring-1 ring-theme-accent';
+              } else {
+                buttonStyles = 'bg-theme-accent/[0.08] text-theme-main border border-theme-accent/30 hover:bg-theme-accent/20 hover:border-theme-accent font-bold shadow-2xs';
+              }
+            } else {
+              if (isActive) {
+                buttonStyles = 'bg-theme-accent/15 text-theme-accent shadow-xs border-l-4 border-theme-accent font-bold';
+              } else {
+                buttonStyles = 'text-theme-secondary hover:text-theme-main hover:bg-theme-page font-semibold';
+              }
+            }
+
             return (
               <button
                 key={item.id}
@@ -179,16 +199,18 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
                 title={item.label}
                 className={`flex items-center ${
                   isCollapsed ? 'md:justify-center px-2' : 'justify-start lg:justify-between px-3'
-                } py-2.5 min-h-[42px] rounded-xl text-xs lg:text-[14px] font-bold transition-all duration-200 group cursor-pointer active:scale-95 shrink-0 md:shrink md:w-full relative ${
-                  isActive
-                    ? 'bg-theme-accent/15 text-theme-accent shadow-xs border-l-4 border-theme-accent'
-                    : 'text-theme-secondary hover:text-theme-main hover:bg-theme-page'
-                }`}
+                } py-2.5 min-h-[42px] rounded-xl text-xs lg:text-[14px] transition-all duration-200 group cursor-pointer active:scale-98 shrink-0 md:shrink md:w-full relative ${buttonStyles}`}
               >
                 <div className="flex items-center gap-2.5 relative">
                   <Icon
                     className={`w-5 h-5 shrink-0 transition-transform group-hover:scale-105 ${
-                      isActive ? 'text-theme-accent' : 'text-theme-secondary group-hover:text-theme-main'
+                      isPrimary && isActive
+                        ? 'text-white'
+                        : isPrimary
+                        ? 'text-theme-accent font-black'
+                        : isActive
+                        ? 'text-theme-accent'
+                        : 'text-theme-secondary group-hover:text-theme-main'
                     }`}
                   />
                   {(!isCollapsed || false) && (
@@ -207,7 +229,11 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
                 {!isCollapsed && item.badge !== undefined && (
                   <span
                     className={`hidden md:inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                      isActive
+                      isPrimary && isActive
+                        ? 'bg-white/25 text-white'
+                        : isPrimary
+                        ? 'bg-theme-accent/20 text-theme-accent font-black'
+                        : isActive
                         ? 'bg-theme-accent/20 text-theme-accent'
                         : 'bg-theme-page text-theme-secondary'
                     }`}
