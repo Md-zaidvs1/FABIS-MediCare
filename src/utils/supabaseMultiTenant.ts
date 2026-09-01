@@ -24,21 +24,43 @@ export const getStoredSupabaseConfig = (): { url: string; anonKey: string } => {
   return { url, anonKey };
 };
 
+export const isSupabaseConfigured = (): boolean => {
+  const { url, anonKey } = getStoredSupabaseConfig();
+  return Boolean(
+    url &&
+    anonKey &&
+    !url.includes('demo-clinic-emr.supabase.co') &&
+    url.startsWith('https://') &&
+    anonKey.length > 20
+  );
+};
+
 let supabaseClient: SupabaseClient | null = null;
 
 export const reinitSupabaseClient = (): SupabaseClient | null => {
   const { url, anonKey } = getStoredSupabaseConfig();
   try {
-    if (url && anonKey) {
+    if (isSupabaseConfigured()) {
       supabaseClient = createClient(url, anonKey, {
         auth: { persistSession: true, autoRefreshToken: true },
+        global: {
+          fetch: (input, init) => {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 8000);
+            return fetch(input, {
+              ...init,
+              signal: init?.signal || controller.signal,
+            }).finally(() => clearTimeout(timeoutId));
+          },
+        },
       });
       return supabaseClient;
     }
   } catch (err) {
     console.warn('Supabase initialization notice:', err);
   }
-  return supabaseClient;
+  supabaseClient = null;
+  return null;
 };
 
 // Initialize client on load
@@ -72,47 +94,65 @@ CREATE TABLE IF NOT EXISTS public.clinic_backups (
     clinic_id TEXT PRIMARY KEY,
     backup_payload JSONB NOT NULL,
     patient_count INT DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Ensure patient_count column exists if table was created previously
+ALTER TABLE IF EXISTS public.clinic_backups ADD COLUMN IF NOT EXISTS patient_count INT DEFAULT 0;
+ALTER TABLE IF EXISTS public.clinic_backups ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
 -- 2. Patients Table (Relational Patient Records with EMR Data)
 CREATE TABLE IF NOT EXISTS public.patients (
     id TEXT PRIMARY KEY,
-    clinic_id TEXT NOT NULL,
+    clinic_id TEXT NOT NULL DEFAULT 'clinic_default_emr',
     mrn TEXT,
     name TEXT NOT NULL,
     phone TEXT,
     gender TEXT,
     age INT,
-    data JSONB NOT NULL,
+    data JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- 3. Chair Operatories Table
 CREATE TABLE IF NOT EXISTS public.chairs (
     id TEXT PRIMARY KEY,
-    clinic_id TEXT NOT NULL,
+    clinic_id TEXT NOT NULL DEFAULT 'clinic_default_emr',
     name TEXT,
-    status TEXT,
-    data JSONB,
+    status TEXT DEFAULT 'Available',
+    data JSONB DEFAULT '{}'::jsonb,
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- 4. SMS & Patient Outreach Log Table
 CREATE TABLE IF NOT EXISTS public.sms_logs (
     id TEXT PRIMARY KEY,
-    clinic_id TEXT NOT NULL,
+    clinic_id TEXT NOT NULL DEFAULT 'clinic_default_emr',
     recipient_phone TEXT,
     message TEXT,
     status TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Disable Row Level Security (RLS) for seamless REST API access using Anon Key
+-- Row Level Security (RLS) Configuration for API Access
 ALTER TABLE public.clinic_backups DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.patients DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chairs DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.sms_logs DISABLE ROW LEVEL SECURITY;
+
+-- Enable Supabase Realtime Publication for Multi-Device Live Sync
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    BEGIN
+      ALTER PUBLICATION supabase_realtime ADD TABLE public.patients, public.clinic_backups, public.chairs, public.sms_logs;
+    EXCEPTION WHEN duplicate_object THEN
+      -- Table already in publication
+    END;
+  END IF;
+END $$;
 `;
 };
 
@@ -415,6 +455,57 @@ export const deleteClinicRecord = async (
   } catch (err) {
     console.error(`Exception deleting record ${recordId} from ${tableName}:`, err);
     return false;
+  }
+};
+
+/**
+ * Upserts a single Patient record directly to the Supabase 'patients' table.
+ * Used for atomic per-patient operations across multi-device instances.
+ */
+export const upsertSinglePatientToSupabase = async (
+  patient: Patient,
+  doctor?: DoctorProfile
+): Promise<boolean> => {
+  if (!patient || !patient.id) return false;
+  return upsertClinicRecords('patients', [patient], doctor, 'id');
+};
+
+/**
+ * Fetches all patient records belonging to the active clinic from Supabase.
+ */
+export const fetchSupabasePatients = async (
+  doctor?: DoctorProfile
+): Promise<Patient[] | null> => {
+  const records = await fetchClinicRecords<any>('patients', doctor);
+  if (!records) return null;
+
+  return records
+    .map((rec) => (rec?.data && typeof rec.data === 'object' ? { ...rec.data, ...rec } : rec))
+    .filter((p) => p && (p.id || p.mrn));
+};
+
+/**
+ * Fetches the clinic backup payload containing clinic-wide configuration & SMS settings.
+ */
+export const fetchSupabaseClinicBackup = async (
+  doctor?: DoctorProfile
+): Promise<any | null> => {
+  const client = supabaseClient || reinitSupabaseClient();
+  if (!client) return null;
+
+  const clinicId = getActiveClinicId(doctor);
+  try {
+    const { data, error } = await client
+      .from('clinic_backups')
+      .select('backup_payload')
+      .eq('clinic_id', clinicId)
+      .single();
+
+    if (error || !data) return null;
+    return data.backup_payload;
+  } catch (err) {
+    console.warn('Notice fetching clinic backup from Supabase:', err);
+    return null;
   }
 };
 

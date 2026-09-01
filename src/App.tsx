@@ -64,14 +64,16 @@ export default function App() {
   const [doctor, setDoctorState] = useState<DoctorProfile>(getStoredDoctor);
   const [patients, setPatientsState] = useState<Patient[]>(getStoredPatients);
 
-  // Production Data Protection & Offline Dual Save Hook
+  // Production Data Protection & Offline Dual Save Hook with Realtime Multi-Device Sync
   const {
     isOnline,
     pendingCount,
     isSyncing,
     syncPendingRecords,
     triggerDualSave,
-  } = useOfflineSync(patients);
+    syncSinglePatient,
+    deleteSinglePatient,
+  } = useOfflineSync(patients, setPatientsState, setDoctorState);
 
   const [activeTab, setActiveTab] = useState<NavigationTab>('dashboard');
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
@@ -137,11 +139,29 @@ export default function App() {
     };
   }, []);
 
-  // Sync patients changes to localStorage and IndexedDB (Dual Save)
+  // Sync patients changes to state, localStorage, IndexedDB, and atomically to Supabase Cloud
   const updatePatients = (newPatients: Patient[]) => {
+    // Determine added or modified patients for atomic per-patient Supabase upsert
+    const prevMap = new Map((patients || []).map((p) => [p.id, JSON.stringify(p)]));
+    const modifiedOrAdded = newPatients.filter((p) => {
+      const prevStr = prevMap.get(p.id);
+      return !prevStr || prevStr !== JSON.stringify(p);
+    });
+
+    const newIds = new Set(newPatients.map((p) => p.id));
+    const deletedIds = (patients || []).filter((p) => !newIds.has(p.id)).map((p) => p.id);
+
     setPatientsState(newPatients);
     savePatients(newPatients);
     triggerDualSave(newPatients);
+
+    // Sync atomic patient mutations to Supabase and other devices
+    modifiedOrAdded.forEach((p) => {
+      syncSinglePatient(p);
+    });
+    deletedIds.forEach((id) => {
+      deleteSinglePatient(id);
+    });
   };
 
   const updateDoctor = (newDoctor: DoctorProfile) => {

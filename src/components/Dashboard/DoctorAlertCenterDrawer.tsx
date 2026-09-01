@@ -223,7 +223,7 @@ export const DoctorAlertCenterDrawer: React.FC<DoctorAlertCenterDrawerProps> = (
       setSmsModal((prev) => ({
         ...prev,
         isSending: false,
-        feedback: { type: 'error', text: 'Message could not be sent. Please check TextBee connection.' },
+        feedback: { type: 'error', text: err.message || 'Failed to send SMS. Please check TextBee connection.' },
       }));
     }
   };

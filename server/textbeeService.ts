@@ -46,9 +46,10 @@ export function isValidPhoneNumber(phone: string): boolean {
 
 /**
  * Sends SMS via TextBee API REST Gateway
- * Endpoint: POST https://api.textbee.dev/api/v1/gateway/devices/{DEVICE_ID}/send-sms
+ * Primary endpoint: POST https://api.textbee.dev/api/v1/gateway/send-sms
  * Header: x-api-key: {API_KEY}
- * Body: { "recipients": ["+91XXXXXXXXXX"], "message": "string" }
+ * Body: { "recipients": ["+91XXXXXXXXXX"], "message": "string", "deviceId": "string" }
+ * Fallback endpoint: POST https://api.textbee.dev/api/v1/gateway/devices/{DEVICE_ID}/send-sms
  */
 export async function sendTextBeeSms(params: {
   deviceId: string;
@@ -78,38 +79,77 @@ export async function sendTextBeeSms(params: {
     return { success: false, error: 'SMS message body cannot be empty' };
   }
 
-  const url = `https://api.textbee.dev/api/v1/gateway/devices/${encodeURIComponent(deviceId.trim())}/send-sms`;
+  const cleanDeviceId = deviceId.trim();
+  const cleanApiKey = apiKey.trim();
+  const cleanMessage = message.trim();
+
+  // Try Primary TextBee Gateway endpoint first
+  const primaryUrl = 'https://api.textbee.dev/api/v1/gateway/send-sms';
 
   try {
-    const response = await fetch(url, {
+    const response = await fetch(primaryUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey.trim(),
+        'x-api-key': cleanApiKey,
       },
       body: JSON.stringify({
         recipients: [normalizedPhone],
-        message: message.trim(),
+        message: cleanMessage,
+        deviceId: cleanDeviceId,
       }),
     });
 
     const data = await response.json().catch(() => ({}));
 
-    if (!response.ok) {
-      const errMsg =
-        data?.message ||
-        data?.error ||
-        `TextBee Gateway HTTP error ${response.status}: ${response.statusText}`;
+    if (response.ok && (data.success !== false)) {
       return {
-        success: false,
-        error: errMsg,
+        success: true,
+        messageId: data?.data?.id || data?.id || `tb_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         rawResponse: data,
       };
     }
 
+    // If primary returned 404 (endpoint variant), try device-specific endpoint
+    if (response.status === 404) {
+      const fallbackUrl = `https://api.textbee.dev/api/v1/gateway/devices/${encodeURIComponent(cleanDeviceId)}/send-sms`;
+      const fallbackRes = await fetch(fallbackUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': cleanApiKey,
+        },
+        body: JSON.stringify({
+          recipients: [normalizedPhone],
+          message: cleanMessage,
+        }),
+      });
+
+      const fallbackData = await fallbackRes.json().catch(() => ({}));
+      if (fallbackRes.ok && (fallbackData.success !== false)) {
+        return {
+          success: true,
+          messageId: fallbackData?.data?.id || fallbackData?.id || `tb_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          rawResponse: fallbackData,
+        };
+      }
+
+      const fbError = fallbackData?.message || fallbackData?.error || `TextBee HTTP ${fallbackRes.status}: ${fallbackRes.statusText}`;
+      return {
+        success: false,
+        error: fbError,
+        rawResponse: fallbackData,
+      };
+    }
+
+    const errMsg =
+      data?.message ||
+      data?.error ||
+      (Array.isArray(data?.errors) ? data.errors.join(', ') : null) ||
+      `TextBee Gateway HTTP error ${response.status}: ${response.statusText}`;
     return {
-      success: true,
-      messageId: data?.data?.id || data?.id || `tb_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      success: false,
+      error: errMsg,
       rawResponse: data,
     };
   } catch (err: any) {
@@ -132,13 +172,16 @@ export async function checkTextBeeDeviceHealth(params: {
     return { isOnline: false, error: 'Missing Device ID or API Key' };
   }
 
+  const cleanDeviceId = deviceId.trim();
+  const cleanApiKey = apiKey.trim();
+
   try {
-    // Ping device info endpoint or devices endpoint if supported by TextBee
-    const url = `https://api.textbee.dev/api/v1/gateway/devices/${encodeURIComponent(deviceId.trim())}`;
+    // Ping device info endpoint
+    const url = `https://api.textbee.dev/api/v1/gateway/devices/${encodeURIComponent(cleanDeviceId)}`;
     const response = await fetch(url, {
       method: 'GET',
       headers: {
-        'x-api-key': apiKey.trim(),
+        'x-api-key': cleanApiKey,
       },
     });
 
@@ -150,13 +193,37 @@ export async function checkTextBeeDeviceHealth(params: {
       };
     }
 
-    // If device info endpoint returns 404/not implemented, credentials are still valid if status != 401
     if (response.status === 401 || response.status === 403) {
-      return { isOnline: false, error: 'Invalid TextBee API Key or unauthorized' };
+      return { isOnline: false, error: 'Invalid TextBee API Key (Unauthorized)' };
     }
 
-    // If status 200/404 assume device exists and credential is valid
-    return { isOnline: true, deviceName: 'Registered Android Phone' };
+    if (response.status === 404) {
+      // Check devices list endpoint
+      try {
+        const listRes = await fetch('https://api.textbee.dev/api/v1/gateway/devices', {
+          method: 'GET',
+          headers: { 'x-api-key': cleanApiKey },
+        });
+        if (listRes.ok) {
+          const listData = await listRes.json().catch(() => ({}));
+          const devices = Array.isArray(listData?.data) ? listData.data : (Array.isArray(listData) ? listData : []);
+          const match = devices.find((d: any) => d.id === cleanDeviceId || d.deviceId === cleanDeviceId);
+          if (match) {
+            return {
+              isOnline: true,
+              deviceName: match.name || 'TextBee Android Gateway',
+            };
+          }
+          return {
+            isOnline: false,
+            error: `Device ID "${cleanDeviceId}" not found on TextBee account`,
+          };
+        }
+      } catch {}
+      return { isOnline: false, error: `TextBee device "${cleanDeviceId}" not found (404)` };
+    }
+
+    return { isOnline: false, error: `TextBee Gateway HTTP ${response.status}` };
   } catch (err: any) {
     return { isOnline: false, error: err.message || 'Unable to ping TextBee service' };
   }

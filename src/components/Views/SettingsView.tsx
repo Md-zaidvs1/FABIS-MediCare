@@ -703,21 +703,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <span>Doctor Profile & Prescription PDF</span>
         </button>
 
-        {/* SMS Gateway Tab is strictly Admin-Only */}
-        {activeRole === 'admin' && (
-          <button
-            type="button"
-            onClick={() => setActiveSection('sms')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
-              activeSection === 'sms'
-                ? 'bg-emerald-600 text-white shadow-md'
-                : 'bg-theme-card text-theme-secondary hover:text-theme-main border border-theme-border'
-            }`}
-          >
-            <Smartphone className="w-4 h-4 text-emerald-300" />
-            <span>SMS Gateway (TextBee)</span>
-          </button>
-        )}
+        {/* SMS Gateway Tab - Accessible to Doctor & Admin */}
+        <button
+          type="button"
+          onClick={() => setActiveSection('sms')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
+            activeSection === 'sms'
+              ? 'bg-emerald-600 text-white shadow-md'
+              : 'bg-theme-card text-theme-secondary hover:text-theme-main border border-theme-border'
+          }`}
+        >
+          <Smartphone className="w-4 h-4 text-emerald-300" />
+          <span>SMS Gateway (TextBee)</span>
+        </button>
 
         <button
           type="button"
@@ -752,8 +750,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         )}
       </div>
 
-      {/* SMS Settings Section (Admin Only) */}
-      {activeSection === 'sms' && activeRole === 'admin' && (
+      {/* SMS Settings Section */}
+      {activeSection === 'sms' && (
         <SmsIntegrationSettings activeRole={activeRole} />
       )}
 

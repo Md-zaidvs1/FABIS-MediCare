@@ -6,9 +6,13 @@ import {
   Send,
   RefreshCw,
   Power,
-  ShieldCheck,
   Radio,
   Info,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Save,
+  Server,
 } from 'lucide-react';
 import {
   connectSmsGateway,
@@ -19,7 +23,7 @@ import {
   checkTextBeeHealthDirect,
 } from '../../utils/smsApi';
 import { SmsPublicSettings, UserRole } from '../../types';
-import { getStoredSmsGatewaySettings } from '../../utils/storage';
+import { getStoredSmsGatewaySettings, saveStoredSmsGatewaySettings } from '../../utils/storage';
 import { performSupabaseCloudBackup } from '../../utils/supabaseCloudBackup';
 
 interface SmsIntegrationSettingsProps {
@@ -27,10 +31,11 @@ interface SmsIntegrationSettingsProps {
 }
 
 export const SmsIntegrationSettings: React.FC<SmsIntegrationSettingsProps> = ({
-  activeRole = 'admin',
+  activeRole = 'doctor',
 }) => {
-  const [clientId, setClientId] = useState('');
+  const [deviceId, setDeviceId] = useState('');
   const [apiKey, setApiKey] = useState('');
+  const [showApiKey, setShowApiKey] = useState(false);
   const [settings, setSettings] = useState<SmsPublicSettings | null>(null);
   const [healthStatus, setHealthStatus] = useState<{ isOnline: boolean; error?: string } | null>(null);
 
@@ -53,9 +58,15 @@ export const SmsIntegrationSettings: React.FC<SmsIntegrationSettingsProps> = ({
 
       if (data.settings) {
         setSettings(data.settings);
-        setClientId(data.settings.deviceId || stored?.deviceId || '');
+        setDeviceId(data.settings.deviceId || stored?.deviceId || '');
+        if (stored?.apiKey) {
+          setApiKey(stored.apiKey);
+        }
       } else if (stored) {
-        setClientId(stored.deviceId || '');
+        setDeviceId(stored.deviceId || '');
+        if (stored.apiKey) {
+          setApiKey(stored.apiKey);
+        }
       }
       if (data.health) {
         setHealthStatus(data.health);
@@ -69,31 +80,43 @@ export const SmsIntegrationSettings: React.FC<SmsIntegrationSettingsProps> = ({
 
   useEffect(() => {
     fetchStatus();
+
+    // Listen for real-time multi-device SMS updates
+    const handleSmsUpdated = () => {
+      fetchStatus();
+    };
+    window.addEventListener('sms-settings-updated', handleSmsUpdated);
+    return () => {
+      window.removeEventListener('sms-settings-updated', handleSmsUpdated);
+    };
   }, []);
 
   const handleConnect = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!clientId.trim() || (!apiKey.trim() && !getStoredSmsGatewaySettings()?.apiKey)) {
-      setBanner({ type: 'error', message: 'Please enter both TextBee Client ID and API Key.' });
+    const cleanDeviceId = deviceId.trim();
+    const stored = getStoredSmsGatewaySettings();
+    const cleanApiKey = apiKey.trim() || stored?.apiKey || '';
+
+    if (!cleanDeviceId || !cleanApiKey) {
+      setBanner({ type: 'error', message: 'Please enter both TextBee Device ID and API Key.' });
       return;
     }
-
-    const effectiveApiKey = apiKey.trim() || getStoredSmsGatewaySettings()?.apiKey || '';
 
     setIsConnecting(true);
     setBanner(null);
 
     try {
       const res = await connectSmsGateway({
-        deviceId: clientId.trim(),
-        clientId: clientId.trim(),
-        apiKey: effectiveApiKey,
+        deviceId: cleanDeviceId,
+        clientId: cleanDeviceId,
+        apiKey: cleanApiKey,
       });
 
-      setBanner({ type: 'success', message: '✓ TextBee Connected & Credentials Saved Successfully' });
+      setBanner({ type: 'success', message: '✓ TextBee Connected & Saved for all clinic devices' });
       setSettings(res.settings);
-      setApiKey(''); // Clear plain API key input for security
+      setApiKey(cleanApiKey);
 
+      // Perform full cloud sync to Supabase clinic_backups so all devices immediately receive it
       performSupabaseCloudBackup().catch(() => {});
       fetchStatus();
     } catch (err: any) {
@@ -108,22 +131,22 @@ export const SmsIntegrationSettings: React.FC<SmsIntegrationSettingsProps> = ({
     setBanner(null);
     try {
       const stored = getStoredSmsGatewaySettings();
-      const targetClientId = clientId.trim() || stored?.deviceId || '';
+      const targetDeviceId = deviceId.trim() || stored?.deviceId || '';
       const targetApiKey = apiKey.trim() || stored?.apiKey || '';
 
-      if (!targetClientId || !targetApiKey) {
-        setBanner({ type: 'error', message: 'Please enter or save TextBee Client ID and API Key first.' });
+      if (!targetDeviceId || !targetApiKey) {
+        setBanner({ type: 'error', message: 'Please enter TextBee Device ID and API Key first.' });
         setIsTestingConn(false);
         return;
       }
 
       const health = await checkTextBeeHealthDirect({
-        deviceId: targetClientId,
+        deviceId: targetDeviceId,
         apiKey: targetApiKey,
       });
 
       if (health.isOnline) {
-        setBanner({ type: 'success', message: '✓ TextBee Connected (Android Gateway Online)' });
+        setBanner({ type: 'success', message: '✓ TextBee Connected (Android Gateway Online & Active)' });
         setHealthStatus({ isOnline: true });
       } else {
         setBanner({ type: 'error', message: health.error || '⚠ TextBee Disconnected. Please check connection and credentials.' });
@@ -137,7 +160,7 @@ export const SmsIntegrationSettings: React.FC<SmsIntegrationSettingsProps> = ({
   };
 
   const handleDisconnect = async () => {
-    if (!window.confirm('Are you sure you want to disconnect TextBee SMS Gateway?')) {
+    if (!window.confirm('Are you sure you want to disconnect the TextBee SMS Gateway?')) {
       return;
     }
 
@@ -148,7 +171,7 @@ export const SmsIntegrationSettings: React.FC<SmsIntegrationSettingsProps> = ({
       const res = await disconnectSmsGateway();
       setBanner({ type: 'success', message: res.message || 'TextBee disconnected.' });
       setSettings(res.settings);
-      setClientId('');
+      setDeviceId('');
       setApiKey('');
       fetchStatus();
     } catch (err: any) {
@@ -173,7 +196,7 @@ export const SmsIntegrationSettings: React.FC<SmsIntegrationSettingsProps> = ({
       setBanner({ type: 'success', message: res.message || 'Test SMS sent successfully via TextBee!' });
       fetchStatus();
     } catch (err: any) {
-      setBanner({ type: 'error', message: 'Message could not be sent. Please check TextBee connection.' });
+      setBanner({ type: 'error', message: err.message || 'Failed to send test SMS. Please check TextBee connection.' });
     } finally {
       setIsTestingSms(false);
     }
@@ -212,14 +235,19 @@ export const SmsIntegrationSettings: React.FC<SmsIntegrationSettingsProps> = ({
       )}
 
       {/* Main SMS Gateway Card */}
-      <div className="bg-theme-card border border-theme-border rounded-[28px] p-6 shadow-[0_10px_30px_rgba(0,0,0,0.03)] space-y-6">
+      <div className="bg-theme-card border border-theme-border rounded-[28px] p-6 sm:p-7 shadow-[0_10px_30px_rgba(0,0,0,0.03)] space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-theme-border pb-4">
           <div className="flex items-center gap-3">
             <div className="p-3 rounded-2xl bg-emerald-100 text-emerald-700">
               <Smartphone className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="font-extrabold text-lg text-theme-main">SMS Gateway</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="font-extrabold text-lg text-theme-main">SMS Gateway (TextBee)</h3>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                  {activeRole === 'doctor' ? 'Doctor Access' : 'Admin Access'}
+                </span>
+              </div>
               <p className="text-xs text-theme-secondary font-medium">
                 Automated appointment reminders & direct patient SMS via TextBee Android Gateway
               </p>
@@ -240,14 +268,14 @@ export const SmsIntegrationSettings: React.FC<SmsIntegrationSettingsProps> = ({
                   isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'
                 }`}
               />
-              <span>{isConnected ? '● Connected' : '● Not Connected'}</span>
+              <span>{isConnected ? '● Connected' : '● Disconnected'}</span>
             </div>
 
             <button
               type="button"
               onClick={fetchStatus}
               disabled={isLoadingStatus}
-              title="Refresh status"
+              title="Refresh status from cloud"
               className="p-2 rounded-xl bg-theme-page hover:bg-slate-200 text-theme-secondary border border-theme-border cursor-pointer transition-all disabled:opacity-50"
             >
               <RefreshCw className={`w-4 h-4 ${isLoadingStatus ? 'animate-spin' : ''}`} />
@@ -255,158 +283,155 @@ export const SmsIntegrationSettings: React.FC<SmsIntegrationSettingsProps> = ({
           </div>
         </div>
 
-        {/* Doctor Login View: Doctor ONLY sees Connection Status, never keys or IDs */}
-        {activeRole === 'doctor' && (
-          <div className="space-y-4 py-2">
-            <div className="p-5 rounded-2xl bg-theme-page border border-theme-border flex items-start gap-3.5">
-              <div className={`p-2.5 rounded-xl mt-0.5 shrink-0 ${isConnected ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
-                <Radio className="w-5 h-5" />
+        {/* Unified SMS Gateway Configuration Form for Doctor & Admin */}
+        <form onSubmit={handleConnect} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="text-theme-main font-bold block mb-1.5 flex items-center justify-between">
+                <span>TextBee Device ID</span>
+                <span className="text-[11px] font-normal text-theme-secondary">From TextBee App</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. 660f... or client device id"
+                  value={deviceId}
+                  onChange={(e) => setDeviceId(e.target.value)}
+                  className="w-full p-3 bg-theme-page border border-theme-border rounded-2xl font-mono text-xs text-theme-main focus:border-emerald-500 outline-none"
+                />
               </div>
-              <div className="space-y-1">
-                <h4 className="font-extrabold text-sm text-theme-main">
-                  SMS Gateway: {isConnected ? <span className="text-emerald-600">Connected</span> : <span className="text-slate-500">Not Connected</span>}
-                </h4>
-                <p className="text-xs text-theme-secondary font-medium leading-relaxed">
-                  {isConnected ? (
-                    <>
-                      The clinic SMS Gateway is operational. All doctor SMS dispatches, appointment alerts, and treatment follow-up reminders will be automatically transmitted through the clinic Android device.
-                    </>
-                  ) : (
-                    <>
-                      The SMS Gateway is currently offline or not configured. Please contact the Clinic Administrator to configure TextBee credentials in Admin Settings.
-                    </>
-                  )}
-                </p>
+            </div>
+
+            <div>
+              <label className="text-theme-main font-bold block mb-1.5 flex items-center justify-between">
+                <span>TextBee API Key / Secret API Key</span>
+                <span className="text-[11px] font-normal text-theme-secondary">Dashboard API Key</span>
+              </label>
+              <div className="relative">
+                <input
+                  type={showApiKey ? 'text' : 'password'}
+                  required
+                  placeholder={settings?.hasApiKey ? `•••••••• (${settings.maskedApiKey})` : 'Enter TextBee Secret API Key'}
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  className="w-full p-3 pr-10 bg-theme-page border border-theme-border rounded-2xl font-mono text-xs text-theme-main focus:border-emerald-500 outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowApiKey(!showApiKey)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+                  title={showApiKey ? 'Hide API Key' : 'Show API Key'}
+                >
+                  {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
             </div>
           </div>
-        )}
 
-        {/* Admin Login View: Admin configures Client ID + API Key */}
-        {activeRole === 'admin' && (
-          <div className="space-y-6">
-            <form onSubmit={handleConnect} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-theme-main font-bold block mb-1.5">
-                    TextBee Client ID
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Enter TextBee Client ID / Device ID"
-                    value={clientId}
-                    onChange={(e) => setClientId(e.target.value)}
-                    className="w-full p-3 bg-theme-page border border-theme-border rounded-2xl font-mono text-xs text-theme-main focus:border-emerald-500 outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-theme-main font-bold block mb-1.5">
-                    TextBee API Key
-                  </label>
-                  <input
-                    type="password"
-                    placeholder={settings?.hasApiKey ? `•••••••• (${settings.maskedApiKey})` : 'Enter TextBee API Key'}
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    className="w-full p-3 bg-theme-page border border-theme-border rounded-2xl font-mono text-xs text-theme-main focus:border-emerald-500 outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                <div className="flex items-center gap-2">
-                  {settings?.connected && (
-                    <button
-                      type="button"
-                      onClick={handleDisconnect}
-                      disabled={isDisconnecting}
-                      className="px-4 py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold flex items-center gap-1.5 transition-all cursor-pointer"
-                    >
-                      <Power className="w-4 h-4" />
-                      <span>{isDisconnecting ? 'Disconnecting...' : 'Disconnect'}</span>
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={handleTestConnection}
-                    disabled={isTestingConn}
-                    className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold transition-all cursor-pointer shadow-xs disabled:opacity-50 flex items-center gap-2"
-                  >
-                    <RefreshCw className={`w-4 h-4 ${isTestingConn ? 'animate-spin' : ''}`} />
-                    <span>{isTestingConn ? 'Testing...' : 'Test Connection'}</span>
-                  </button>
-
-                  <button
-                    type="submit"
-                    disabled={isConnecting}
-                    className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition-all cursor-pointer shadow-xs disabled:opacity-50 flex items-center gap-2"
-                  >
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>{isConnecting ? 'Saving...' : 'Save & Connect'}</span>
-                  </button>
-                </div>
-              </div>
-            </form>
-
-            {/* Crucial Gateway Operational Notice */}
-            <div className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200/80 text-amber-900 flex items-start gap-3">
-              <Info className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-              <div className="space-y-1 text-xs">
-                <p className="font-extrabold text-amber-950">Important Gateway Requirement</p>
-                <p className="text-amber-900/90 leading-relaxed font-medium">
-                  The Android phone running the TextBee app remains the SMS gateway. The phone must stay powered on, connected to the internet, with the SIM card and TextBee app active.
-                </p>
-              </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+            <div className="flex items-center gap-2">
+              {settings?.connected && (
+                <button
+                  type="button"
+                  onClick={handleDisconnect}
+                  disabled={isDisconnecting}
+                  className="px-4 py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Power className="w-4 h-4" />
+                  <span>{isDisconnecting ? 'Disconnecting...' : 'Disconnect Gateway'}</span>
+                </button>
+              )}
             </div>
 
-            {/* Test SMS Dispatcher */}
-            <div className="pt-4 border-t border-theme-border space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-xs text-theme-main flex items-center gap-1.5">
-                  <Send className="w-4 h-4 text-emerald-600" />
-                  <span>Send Test SMS</span>
-                </span>
-                <span className="text-[11px] text-theme-secondary">Test SMS delivery to patient phone</span>
-              </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleTestConnection}
+                disabled={isTestingConn}
+                className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold transition-all cursor-pointer shadow-xs disabled:opacity-50 flex items-center gap-2"
+              >
+                <RefreshCw className={`w-4 h-4 ${isTestingConn ? 'animate-spin' : ''}`} />
+                <span>{isTestingConn ? 'Testing...' : 'Test Connection'}</span>
+              </button>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <input
-                    type="text"
-                    placeholder="+919876543210"
-                    value={testNumber}
-                    onChange={(e) => setTestNumber(e.target.value)}
-                    className="w-full p-2.5 bg-theme-page border border-theme-border rounded-xl font-mono text-xs text-theme-main outline-none"
-                  />
-                </div>
-                <div className="sm:col-span-2 flex gap-2">
-                  <input
-                    type="text"
-                    value={testMessage}
-                    onChange={(e) => setTestMessage(e.target.value)}
-                    className="w-full p-2.5 bg-theme-page border border-theme-border rounded-xl text-xs text-theme-main outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleSendTestSms}
-                    disabled={isTestingSms || !isConnected}
-                    className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold disabled:opacity-50 shrink-0 cursor-pointer transition-all flex items-center gap-1.5"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>Send</span>
-                  </button>
-                </div>
-              </div>
+              <button
+                type="submit"
+                disabled={isConnecting}
+                className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition-all cursor-pointer shadow-xs disabled:opacity-50 flex items-center gap-2"
+              >
+                <Save className="w-4 h-4" />
+                <span>{isConnecting ? 'Saving...' : 'Save & Connect'}</span>
+              </button>
             </div>
           </div>
-        )}
+        </form>
+
+        {/* Crucial Gateway Operational Notice & Cloud Status */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+          <div className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200/80 text-amber-900 flex items-start gap-3">
+            <Info className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div className="space-y-1 text-xs">
+              <p className="font-extrabold text-amber-950">Android Gateway Requirement</p>
+              <p className="text-amber-900/90 leading-relaxed font-medium">
+                Keep the registered Android phone powered on with the TextBee app open, SIM card active, and connected to WiFi/mobile data.
+              </p>
+            </div>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-indigo-50/70 border border-indigo-200/80 text-indigo-900 flex items-start gap-3">
+            <Server className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
+            <div className="space-y-1 text-xs">
+              <p className="font-extrabold text-indigo-950">Multi-Device Cloud Sync</p>
+              <p className="text-indigo-900/90 leading-relaxed font-medium">
+                TextBee credentials saved here are instantly synchronized via Supabase to all clinic computers, doctor laptops, and admin terminals.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Test SMS Dispatcher */}
+        <div className="pt-4 border-t border-theme-border space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="font-bold text-xs text-theme-main flex items-center gap-1.5">
+              <Send className="w-4 h-4 text-emerald-600" />
+              <span>Send Test SMS</span>
+            </span>
+            <span className="text-[11px] text-theme-secondary">Deliver instant test message to any phone</span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <input
+                type="text"
+                placeholder="+919876543210"
+                value={testNumber}
+                onChange={(e) => setTestNumber(e.target.value)}
+                className="w-full p-2.5 bg-theme-page border border-theme-border rounded-xl font-mono text-xs text-theme-main outline-none focus:border-emerald-500"
+              />
+            </div>
+            <div className="sm:col-span-2 flex gap-2">
+              <input
+                type="text"
+                value={testMessage}
+                onChange={(e) => setTestMessage(e.target.value)}
+                className="w-full p-2.5 bg-theme-page border border-theme-border rounded-xl text-xs text-theme-main outline-none focus:border-emerald-500"
+              />
+              <button
+                type="button"
+                onClick={handleSendTestSms}
+                disabled={isTestingSms || !isConnected}
+                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold disabled:opacity-50 shrink-0 cursor-pointer transition-all flex items-center gap-1.5 shadow-xs"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>{isTestingSms ? 'Sending...' : 'Send Test SMS'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
 };
+
 
